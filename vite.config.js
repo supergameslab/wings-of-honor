@@ -2,6 +2,7 @@ import { defineConfig } from 'vite';
 import { cloudflare } from '@cloudflare/vite-plugin';
 
 export default defineConfig({
+  base: '/wings-of-honor/',
   plugins: [cloudflare({ viteEnvironment: { name: 'worker' } })],
   server: {
     host: '0.0.0.0',
@@ -17,7 +18,6 @@ export default defineConfig({
         rollupOptions: {
           input: {
             main: 'index.html',
-            wings: 'wings/index.html',
             ops: 'ops.html',
           },
         },

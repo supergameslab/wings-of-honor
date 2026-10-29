@@ -1,0 +1,22 @@
+-- Function-prefix live tables. Generated from worker/tables.js renameStatements().
+ALTER TABLE users RENAME TO auth_users;
+ALTER TABLE sessions RENAME TO auth_sessions;
+ALTER TABLE magic_links RENAME TO auth_magic_links;
+ALTER TABLE banned_emails RENAME TO auth_banned_emails;
+ALTER TABLE squadrons RENAME TO social_squadrons;
+ALTER TABLE squadron_members RENAME TO social_squadron_members;
+ALTER TABLE invites RENAME TO social_invites;
+ALTER TABLE blocks RENAME TO social_blocks;
+ALTER TABLE recent_contacts RENAME TO social_recent;
+ALTER TABLE matches RENAME TO match_rooms;
+ALTER TABLE join_tickets RENAME TO match_tickets;
+ALTER TABLE challenges RENAME TO match_challenges;
+ALTER TABLE sortie_history RENAME TO progress_sorties;
+ALTER TABLE ribbons RENAME TO progress_ribbons;
+ALTER TABLE entitlements RENAME TO shop_entitlements;
+ALTER TABLE reports RENAME TO moderation_reports;
+ALTER TABLE idents RENAME TO ops_idents;
+ALTER TABLE telemetry_blobs RENAME TO ops_telemetry;
+ALTER TABLE funnel_daily RENAME TO ops_funnel;
+ALTER TABLE mission_daily RENAME TO ops_missions;
+ALTER TABLE flags RENAME TO ops_flags;

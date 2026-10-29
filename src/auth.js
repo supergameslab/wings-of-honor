@@ -1,3 +1,5 @@
+import { apiPath } from './paths.js';
+
 const TOKEN_KEY = 'wings-honor-session';
 const USER_KEY = 'wings-honor-user';
 
@@ -26,7 +28,7 @@ export async function api(path, options = {}) {
   if (options.body && !headers['content-type']) headers['content-type'] = 'application/json';
   if (sessionToken) headers.authorization = `Bearer ${sessionToken}`;
   try {
-    const res = await fetch(path, { ...options, headers, credentials: 'include' });
+    const res = await fetch(apiPath(path), { ...options, headers, credentials: 'include' });
     const data = await res.json().catch(() => null);
     if (!res.ok) return { error: data?.error || String(res.status), status: res.status };
     return data || { ok: true };

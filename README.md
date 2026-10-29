@@ -4,6 +4,8 @@ A browser-first, 3D arcade WWII flight-combat game. Tagline: **Fly. Fight. Win.*
 
 > This is a playable prototype foundation, not a finished commercial game. Aircraft, terrain, clouds, explosions, enemy AI, touch controls and UI are procedurally built or generated locally.
 
+Live: [supergameslab.com/wings-of-honor](https://supergameslab.com/wings-of-honor/)
+
 ## Run locally in the browser
 
 Requirements: Node.js 18 or newer and npm.
@@ -13,11 +15,10 @@ npm install
 npm run dev
 ```
 
-Open the URL Vite prints, usually **http://localhost:5173**. That local server runs both:
+Open the URL Vite prints, usually **http://localhost:5173/wings-of-honor/**. That local server runs:
 
-- the Super Games Lab portal at `/`
-- the game at **http://localhost:5173/wings/**
-- the Cloudflare Worker API at `/api/*`
+- the game at **http://localhost:5173/wings-of-honor/**
+- the Cloudflare Worker API at `/wings-of-honor/api/*`
 
 Desktop controls: **WASD / arrow keys** to fly, **Space** to fire, **B** to drop a bomb, **Esc** to pause. On touchscreens use the left virtual stick and FIRE/BOMB buttons.
 
@@ -37,12 +38,10 @@ npm run preview
 ## Project structure
 
 ```text
-├── index.html              # Super Games Lab portal
-├── wings/index.html        # Game shell
+├── index.html              # Game shell
 ├── src/                    # Client: flight, AI, campaign, world, HUD
 ├── worker/                 # Cloudflare Worker API
-├── public/assets/          # Title art and icons
-└── Wings_of_Honor_Blueprint/  # Product and implementation plan
+└── public/assets/          # Title art and icons
 ```
 
 This project uses generated/procedural placeholder art and is not affiliated with any air force or aircraft manufacturer.

@@ -1,3 +1,5 @@
+import { apiPath } from './paths.js';
+
 const AID_KEY = 'wings-honor-aid';
 const AGE_KEY = 'wings-honor-age-ok';
 const TEL_KEY = 'wings-honor-telemetry';
@@ -92,7 +94,7 @@ export async function flush() {
   if (!allowed || !aid || !queue.length) return;
   const events = queue.splice(0, 20);
   try {
-    await fetch('/api/telemetry', {
+    await fetch(apiPath('/api/telemetry'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       credentials: 'include',

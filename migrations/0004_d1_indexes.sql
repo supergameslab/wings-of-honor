@@ -1,0 +1,25 @@
+-- Indexes after prefix rename. Generated from worker/tables.js indexStatements().
+DROP INDEX IF EXISTS idx_idents_user;
+DROP INDEX IF EXISTS idx_idents_seen;
+DROP INDEX IF EXISTS idx_blobs_at;
+DROP INDEX IF EXISTS idx_blobs_aid;
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires ON auth_sessions(expires_at);
+CREATE INDEX IF NOT EXISTS idx_auth_magic_expires ON auth_magic_links(expires_at);
+CREATE INDEX IF NOT EXISTS idx_social_members_user ON social_squadron_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_social_invites_inbox ON social_invites(to_user, accepted, expires_at);
+CREATE INDEX IF NOT EXISTS idx_social_invites_email ON social_invites(email, accepted, expires_at);
+CREATE INDEX IF NOT EXISTS idx_social_invites_from ON social_invites(from_user, accepted, expires_at);
+CREATE INDEX IF NOT EXISTS idx_social_recent_at ON social_recent(user_id, at);
+CREATE INDEX IF NOT EXISTS idx_match_rooms_status ON match_rooms(status, mode, created_at);
+CREATE INDEX IF NOT EXISTS idx_match_pilots_user ON match_pilots(user_id);
+CREATE INDEX IF NOT EXISTS idx_progress_sorties_user ON progress_sorties(user_id, at);
+CREATE INDEX IF NOT EXISTS idx_progress_sorties_board ON progress_sorties(at, kind);
+CREATE INDEX IF NOT EXISTS idx_progress_ribbons_user ON progress_ribbons(user_id, at);
+CREATE INDEX IF NOT EXISTS idx_moderation_reports_at ON moderation_reports(at);
+CREATE INDEX IF NOT EXISTS idx_ops_idents_user ON ops_idents(user_id);
+CREATE INDEX IF NOT EXISTS idx_ops_idents_first ON ops_idents(first_seen);
+CREATE INDEX IF NOT EXISTS idx_ops_idents_seen ON ops_idents(last_seen);
+CREATE INDEX IF NOT EXISTS idx_ops_telemetry_at ON ops_telemetry(at);
+CREATE INDEX IF NOT EXISTS idx_ops_telemetry_aid ON ops_telemetry(aid);
+CREATE INDEX IF NOT EXISTS idx_ops_audit_at ON ops_audit(at);

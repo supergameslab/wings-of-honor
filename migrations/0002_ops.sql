@@ -1,14 +1,12 @@
-CREATE TABLE IF NOT EXISTS idents (
+CREATE TABLE IF NOT EXISTS ops_idents (
   aid TEXT PRIMARY KEY,
   user_id TEXT,
   first_seen INTEGER NOT NULL,
   last_seen INTEGER NOT NULL,
   telemetry_ok INTEGER DEFAULT 1
 );
-CREATE INDEX IF NOT EXISTS idx_idents_user ON idents(user_id);
-CREATE INDEX IF NOT EXISTS idx_idents_seen ON idents(last_seen);
 
-CREATE TABLE IF NOT EXISTS telemetry_blobs (
+CREATE TABLE IF NOT EXISTS ops_telemetry (
   id TEXT PRIMARY KEY,
   at INTEGER NOT NULL,
   aid TEXT NOT NULL,
@@ -16,10 +14,8 @@ CREATE TABLE IF NOT EXISTS telemetry_blobs (
   n INTEGER NOT NULL,
   json TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_blobs_at ON telemetry_blobs(at);
-CREATE INDEX IF NOT EXISTS idx_blobs_aid ON telemetry_blobs(aid);
 
-CREATE TABLE IF NOT EXISTS funnel_daily (
+CREATE TABLE IF NOT EXISTS ops_funnel (
   day INTEGER PRIMARY KEY,
   boots INTEGER DEFAULT 0,
   starts INTEGER DEFAULT 0,
@@ -37,7 +33,7 @@ CREATE TABLE IF NOT EXISTS funnel_daily (
   boot_ms_p50 INTEGER DEFAULT 0
 );
 
-CREATE TABLE IF NOT EXISTS mission_daily (
+CREATE TABLE IF NOT EXISTS ops_missions (
   day INTEGER NOT NULL,
   mission_id INTEGER NOT NULL,
   kind TEXT NOT NULL,
@@ -54,19 +50,19 @@ CREATE TABLE IF NOT EXISTS progress_sync (
   unlocked INTEGER NOT NULL DEFAULT 1,
   completed TEXT NOT NULL DEFAULT '[]',
   stars TEXT NOT NULL DEFAULT '{}',
-  craft_id TEXT NOT NULL DEFAULT 'camel',
+  craft_id TEXT NOT NULL DEFAULT 'spitfire',
   onboarded INTEGER DEFAULT 0,
   rev INTEGER DEFAULT 0,
   updated_at INTEGER NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS banned_emails (
+CREATE TABLE IF NOT EXISTS auth_banned_emails (
   email TEXT PRIMARY KEY,
   at INTEGER NOT NULL,
   reason TEXT
 );
 
-CREATE TABLE IF NOT EXISTS reports (
+CREATE TABLE IF NOT EXISTS moderation_reports (
   id TEXT PRIMARY KEY,
   from_user TEXT,
   about_user TEXT,
@@ -75,7 +71,7 @@ CREATE TABLE IF NOT EXISTS reports (
   at INTEGER NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS flags (
+CREATE TABLE IF NOT EXISTS ops_flags (
   k TEXT PRIMARY KEY,
   v TEXT NOT NULL
 );
@@ -92,6 +88,14 @@ CREATE TABLE IF NOT EXISTS ops_counters (
   n INTEGER NOT NULL DEFAULT 0
 );
 
-INSERT OR IGNORE INTO flags (k, v) VALUES ('mp_enabled', '1');
-INSERT OR IGNORE INTO flags (k, v) VALUES ('shop_enabled', '1');
-INSERT OR IGNORE INTO flags (k, v) VALUES ('telemetry_enabled', '1');
+CREATE INDEX IF NOT EXISTS idx_ops_idents_user ON ops_idents(user_id);
+CREATE INDEX IF NOT EXISTS idx_ops_idents_first ON ops_idents(first_seen);
+CREATE INDEX IF NOT EXISTS idx_ops_idents_seen ON ops_idents(last_seen);
+CREATE INDEX IF NOT EXISTS idx_ops_telemetry_at ON ops_telemetry(at);
+CREATE INDEX IF NOT EXISTS idx_ops_telemetry_aid ON ops_telemetry(aid);
+CREATE INDEX IF NOT EXISTS idx_moderation_reports_at ON moderation_reports(at);
+CREATE INDEX IF NOT EXISTS idx_ops_audit_at ON ops_audit(at);
+
+INSERT OR IGNORE INTO ops_flags (k, v) VALUES ('mp_enabled', '1');
+INSERT OR IGNORE INTO ops_flags (k, v) VALUES ('shop_enabled', '1');
+INSERT OR IGNORE INTO ops_flags (k, v) VALUES ('telemetry_enabled', '1');

@@ -1,14 +1,28 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "wings-of-honor",
+  "account_id": "ff58a14821f29f405a29ec9a3eb185a8",
   "compatibility_date": "2026-10-26",
   "main": "./worker/index.js",
   "upload_source_maps": true,
   "assets": {
+    "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/join", "/join/"]
+    "run_worker_first": [
+      "/api/*",
+      "/wings-of-honor",
+      "/wings-of-honor/*",
+      "/join",
+      "/join/",
+      "/wings",
+      "/wings/"
+    ]
   },
   "workers_dev": true,
+  "routes": [
+    { "pattern": "supergameslab.com/wings-of-honor*", "zone_name": "supergameslab.com" },
+    { "pattern": "www.supergameslab.com/wings-of-honor*", "zone_name": "supergameslab.com" }
+  ],
   "observability": {
     "enabled": true
   },
@@ -18,8 +32,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "wings-of-honor",
-      "database_id": "00000000-0000-0000-0000-000000000001",
+      "database_name": "supergameslab-wings-of-honor",
+      "database_id": "2f793a48-7dbc-4e1f-9815-81b7b394dc47",
       "migrations_dir": "migrations"
     }
   ],

@@ -1,7 +1,9 @@
+import { apiPath } from './paths.js';
+
 const $ = (id) => document.getElementById(id);
 
 async function api(path, opts = {}) {
-  const res = await fetch(path, { credentials: 'include', headers: { 'content-type': 'application/json', ...(opts.headers || {}) }, ...opts });
+  const res = await fetch(apiPath(path), { credentials: 'include', headers: { 'content-type': 'application/json', ...(opts.headers || {}) }, ...opts });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || String(res.status));
   return data;

@@ -1,14 +1,16 @@
+import { apiPath } from './paths.js';
+
 const $ = (id) => document.getElementById(id);
 
 if (window.Capacitor?.isNativePlatform?.()) {
-  location.replace('/wings/');
+  location.replace('/wings-of-honor/');
 }
 
 async function loadBoard() {
   const list = $('lab-board');
   if (!list) return;
   try {
-    const res = await fetch('/api/scores');
+    const res = await fetch(apiPath('/api/scores'));
     const data = await res.json();
     const rows = data.scores || [];
     if (!rows.length) {

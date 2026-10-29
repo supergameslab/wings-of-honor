@@ -1,3 +1,4 @@
+import { TABLES as T } from './tables.js';
 import { DIFFICULTY, layoutFor, missionById } from '../src/campaign.js';
 import { ensureSchema } from './db.js';
 import {
@@ -367,7 +368,7 @@ export class MatchRoom {
     this.stopTick();
     if (this.env.DB && this.room.id) {
       try {
-        await this.env.DB.prepare(`UPDATE matches SET status = 'aborted', completed_at = ?, do_ms = ? WHERE id = ? AND status != 'complete'`).bind(Date.now(), this.room.doMs || 0, this.room.id).run();
+        await this.env.DB.prepare(`UPDATE ${T.matchRooms} SET status = 'aborted', completed_at = ?, do_ms = ? WHERE id = ? AND status != 'complete'`).bind(Date.now(), this.room.doMs || 0, this.room.id).run();
       } catch {}
     }
   }
@@ -433,7 +434,7 @@ export class MatchRoom {
     this.room.liveAt = Date.now();
     this.ensureTick();
     if (this.env.DB && this.room.id) {
-      this.env.DB.prepare(`UPDATE matches SET status = 'live', live_at = ? WHERE id = ?`).bind(this.room.liveAt, this.room.id).run().catch(() => {});
+      this.env.DB.prepare(`UPDATE ${T.matchRooms} SET status = 'live', live_at = ? WHERE id = ?`).bind(this.room.liveAt, this.room.id).run().catch(() => {});
     }
   }
 
@@ -798,20 +799,20 @@ export class MatchRoom {
     try {
       await ensureSchema(this.env);
       await this.env.DB.prepare(
-        `UPDATE matches SET status = ?, completed_at = ?, winner_team = ?, do_ms = ? WHERE id = ? AND status != 'complete'`,
+        `UPDATE ${T.matchRooms} SET status = ?, completed_at = ?, winner_team = ?, do_ms = ? WHERE id = ? AND status != 'complete'`,
       )
         .bind(this.room.status, t, this.room.winnerTeam, this.room.doMs || 0, this.room.id)
         .run();
       for (const p of this.room.pilots) {
         await this.env.DB.prepare(
-          `UPDATE match_pilots SET kills = ?, deaths = ?, ground = ?, recon = ?, alive = ?, callsign = ? WHERE match_id = ? AND user_id = ?`,
+          `UPDATE ${T.matchPilots} SET kills = ?, deaths = ?, ground = ?, recon = ?, alive = ?, callsign = ? WHERE match_id = ? AND user_id = ?`,
         )
           .bind(p.kills, p.deaths, p.ground, p.recon, p.alive ? 1 : 0, p.username, this.room.id, p.id)
           .run();
         const score = p.kills * 500 + p.ground * 350 + p.recon * 250 + (p.aceBonus || 0);
         const won = this.room.mode === 'duel' ? this.room.winnerTeam === p.team : this.room.result === 'win';
         await this.env.DB.prepare(
-          `INSERT INTO sortie_history (id, user_id, callsign, kind, mission_id, score, kills, deaths, ground, recon, win, at)
+          `INSERT INTO ${T.progressSorties} (id, user_id, callsign, kind, mission_id, score, kills, deaths, ground, recon, win, at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
           .bind(crypto.randomUUID(), p.id, p.username, this.room.mode, this.room.missionId, score, p.kills, p.deaths, p.ground, p.recon, won ? 1 : 0, t)
@@ -822,7 +823,7 @@ export class MatchRoom {
         if (this.room.mode === 'duel' && p.alive && this.room.winnerTeam === p.team) ribbons.push('last_man');
         if (p.ground >= 3) ribbons.push('convoy_killer');
         for (const r of ribbons) {
-          await this.env.DB.prepare('INSERT OR IGNORE INTO ribbons (user_id, ribbon, at, match_id) VALUES (?, ?, ?, ?)')
+          await this.env.DB.prepare(`INSERT OR IGNORE INTO ${T.progressRibbons} (user_id, ribbon, at, match_id) VALUES (?, ?, ?, ?)`)
             .bind(p.id, r, t, this.room.id)
             .run();
         }

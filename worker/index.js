@@ -1,5 +1,6 @@
 import { MatchRoom } from './room.js';
-import { ensureSchema, one, all, run, userById, userByEmail, userByUsername, squadronOf, entitlementsOf, touchRecent } from './db.js';
+import { ensureSchema, one, all, run, userById, userByEmail, userByUsername, squadronOf, entitlementsOf, touchRecent, shouldWrite } from './db.js';
+import { TABLES as T } from './tables.js';
 import { json, jsonHeaders, token, now, normalizeEmail, validEmail, normalizeUsername, validUsername, normalizeTag, cookie, readCookie, bearer, readBody, originOf, mpEnabled, PROTOCOL } from './util.js';
 import { sendMail, magicMail, inviteMail } from './mail.js';
 import { ensureOps, flagsOf, ingestTelemetry, routeOps, mergeAndSaveProgress, bindIdent, wipeIdent, runOpsJobs, bumpCounter, clampSortie } from './ops.js';
@@ -23,7 +24,7 @@ function sessionCookie(id, clear = false) {
 async function currentUser(request, env) {
   const sid = bearer(request) || readCookie(request, 'wings_session');
   if (!sid) return null;
-  const row = await one(env, 'SELECT s.id as sid, s.expires_at, u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ? AND u.deleted = 0', sid);
+  const row = await one(env, `SELECT s.id as sid, s.expires_at, u.* FROM ${T.authSessions} s JOIN ${T.authUsers} u ON u.id = s.user_id WHERE s.id = ? AND u.deleted = 0`, sid);
   if (!row || row.expires_at < now()) return null;
   if (row.banned) return null;
   row.sessionId = row.sid;
@@ -64,7 +65,7 @@ async function mePayload(env, user) {
   const members = squadron
     ? await all(
         env,
-        `SELECT u.id, u.username, m.role FROM squadron_members m JOIN users u ON u.id = m.user_id WHERE m.squadron_id = ?`,
+        `SELECT u.id, u.username, m.role FROM ${T.socialMembers} m JOIN ${T.authUsers} u ON u.id = m.user_id WHERE m.squadron_id = ?`,
         squadron.id,
       )
     : [];
@@ -85,7 +86,7 @@ async function mePayload(env, user) {
 
 async function createSession(env, request, userId) {
   const sid = token(24);
-  await run(env, 'INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)', sid, userId, now(), now() + SESSION_MS);
+  await run(env, `INSERT INTO ${T.authSessions} (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)`, sid, userId, now(), now() + SESSION_MS);
   return {
     token: sid,
     headers: { 'set-cookie': sessionCookie(sid) },
@@ -100,30 +101,47 @@ function utcWeekStart(ts = now()) {
   return start;
 }
 
+const MOUNT = '/wings-of-honor';
+
+function stripMount(pathname) {
+  if (pathname === MOUNT) return '/';
+  if (pathname.startsWith(`${MOUNT}/`)) return pathname.slice(MOUNT.length) || '/';
+  return pathname;
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname === '/join' || url.pathname === '/join/') {
-      const dest = new URL('/wings/', url);
+    const pathname = stripMount(url.pathname);
+
+    if (pathname === '/join' || pathname === '/join/' || pathname === '/wings' || pathname === '/wings/') {
+      const dest = new URL(`${MOUNT}/`, url);
       dest.search = url.search;
       return Response.redirect(dest.toString(), 302);
     }
-    if (!url.pathname.startsWith('/api/')) {
-      return new Response(null, { status: 404 });
+
+    if (pathname.startsWith('/api/')) {
+      if (request.method === 'OPTIONS') {
+        return new Response(null, { status: 204, headers: jsonHeaders(request) });
+      }
+      try {
+        await ensureSchema(env);
+        await ensureOps(env);
+        const routed = new URL(url.toString());
+        routed.pathname = pathname;
+        return await route(request, env, routed);
+      } catch (err) {
+        console.error(err);
+        return json(request, { error: 'server error' }, 500);
+      }
     }
 
-    if (request.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: jsonHeaders(request) });
+    if (url.pathname.startsWith(MOUNT) && env.ASSETS) {
+      const dest = new URL(pathname + url.search, url.origin);
+      return env.ASSETS.fetch(new Request(dest, request));
     }
 
-    try {
-      await ensureSchema(env);
-      await ensureOps(env);
-      return await route(request, env, url);
-    } catch (err) {
-      console.error(err);
-      return json(request, { error: 'server error' }, 500);
-    }
+    return new Response(null, { status: 404 });
   },
   async scheduled(_event, env) {
     await ensureSchema(env);
@@ -164,7 +182,7 @@ async function route(request, env, url) {
     const rows = await all(
       env,
       `SELECT callsign as name, SUM(score) as score, MAX(at) as at
-       FROM sortie_history WHERE callsign IS NOT NULL AND callsign != 'deleted' AND user_id IS NOT NULL
+       FROM ${T.progressSorties} WHERE callsign IS NOT NULL AND callsign != 'deleted' AND user_id IS NOT NULL
        GROUP BY user_id ORDER BY score DESC LIMIT 10`,
     );
     return json(request, { scores: rows });
@@ -180,7 +198,7 @@ async function route(request, env, url) {
     const callsign = user?.username || String(body.callsign || 'ACE').slice(0, 16);
     await run(
       env,
-      `INSERT INTO sortie_history (id, user_id, callsign, kind, mission_id, score, kills, deaths, ground, recon, win, at)
+      `INSERT INTO ${T.progressSorties} (id, user_id, callsign, kind, mission_id, score, kills, deaths, ground, recon, win, at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
       user?.id || null,
@@ -197,13 +215,13 @@ async function route(request, env, url) {
     );
     if (user && Array.isArray(body.ribbons)) {
       for (const rib of body.ribbons.slice(0, 8)) {
-        await run(env, 'INSERT OR IGNORE INTO ribbons (user_id, ribbon, at, match_id) VALUES (?, ?, ?, ?)', user.id, String(rib).slice(0, 32), now(), id);
+        await run(env, `INSERT OR IGNORE INTO ${T.progressRibbons} (user_id, ribbon, at, match_id) VALUES (?, ?, ?, ?)`, user.id, String(rib).slice(0, 32), now(), id);
       }
     }
     const scores = await all(
       env,
       `SELECT callsign as name, SUM(score) as score, MAX(at) as at
-       FROM sortie_history WHERE callsign IS NOT NULL AND callsign != 'deleted' AND user_id IS NOT NULL
+       FROM ${T.progressSorties} WHERE callsign IS NOT NULL AND callsign != 'deleted' AND user_id IS NOT NULL
        GROUP BY user_id ORDER BY score DESC LIMIT 10`,
     );
     return json(request, { ok: true, scores });
@@ -217,7 +235,7 @@ async function route(request, env, url) {
     if (!(await rate(env, `magic:${email}`, 5, 3600000))) return json(request, { error: 'that is a lot of mail — try again later' }, 429);
     if (!(await rate(env, `magicip:${ip}`, 20, 86400000))) return json(request, { error: 'that is a lot of mail — try again later' }, 429);
     const tok = token(18);
-    await run(env, 'INSERT INTO magic_links (token, email, created_at, expires_at, used) VALUES (?, ?, ?, ?, 0)', tok, email, now(), now() + 15 * 60 * 1000);
+    await run(env, `INSERT INTO ${T.authMagicLinks} (token, email, created_at, expires_at, used) VALUES (?, ?, ?, ?, 0)`, tok, email, now(), now() + 15 * 60 * 1000);
     const mail = magicMail(originOf(request), tok);
     const sent = await sendMail(env, { to: email, ...mail });
     if (!sent.ok) await bumpCounter(env, 'mail_fail');
@@ -229,20 +247,20 @@ async function route(request, env, url) {
   if (path === '/api/auth/consume' && method === 'POST') {
     const body = await readBody(request);
     const tok = String(body.token || url.searchParams.get('token') || '');
-    let row = await one(env, 'SELECT * FROM magic_links WHERE token = ?', tok);
-    const invite = await one(env, 'SELECT * FROM invites WHERE token = ?', tok);
+    let row = await one(env, `SELECT * FROM ${T.authMagicLinks} WHERE token = ?`, tok);
+    const invite = await one(env, `SELECT * FROM ${T.socialInvites} WHERE token = ?`, tok);
     if (!row && invite) row = { email: invite.email, used: 0, expires_at: invite.expires_at };
     if (!row || row.used || row.expires_at < now()) return json(request, { error: 'that link is too old — ask for a new one' }, 400);
-    if (row.token || (await one(env, 'SELECT token FROM magic_links WHERE token = ?', tok))) {
-      await run(env, 'UPDATE magic_links SET used = 1 WHERE token = ?', tok);
+    if (row.token || (await one(env, `SELECT token FROM ${T.authMagicLinks} WHERE token = ?`, tok))) {
+      await run(env, `UPDATE ${T.authMagicLinks} SET used = 1 WHERE token = ?`, tok);
     }
-    const banned = await one(env, 'SELECT email FROM banned_emails WHERE email = ?', row.email);
+    const banned = await one(env, `SELECT email FROM ${T.authBannedEmails} WHERE email = ?`, row.email);
     if (banned) return json(request, { error: "this account can't play right now" }, 403);
     let user = await userByEmail(env, row.email);
     if (user?.banned) return json(request, { error: "this account can't play right now" }, 403);
     if (!user) {
       const id = crypto.randomUUID();
-      await run(env, 'INSERT INTO users (id, email, created_at, last_seen, age_ok) VALUES (?, ?, ?, ?, 0)', id, row.email, now(), now());
+      await run(env, `INSERT INTO ${T.authUsers} (id, email, created_at, last_seen, age_ok) VALUES (?, ?, ?, ?, 0)`, id, row.email, now(), now());
       user = await userById(env, id);
     }
     const sess = await createSession(env, request, user.id);
@@ -253,7 +271,7 @@ async function route(request, env, url) {
 
   if (path === '/api/auth/logout' && method === 'POST') {
     const sid = bearer(request) || readCookie(request, 'wings_session');
-    if (sid) await run(env, 'DELETE FROM sessions WHERE id = ?', sid);
+    if (sid) await run(env, `DELETE FROM ${T.authSessions} WHERE id = ?`, sid);
     return json(request, { ok: true }, 200, { 'set-cookie': sessionCookie('', true) });
   }
 
@@ -267,7 +285,7 @@ async function route(request, env, url) {
     const { user, error } = await requireUser(request, env);
     if (error) return error;
     const body = await readBody(request);
-    if (body.age_ok) await run(env, 'UPDATE users SET age_ok = 1 WHERE id = ?', user.id);
+    if (body.age_ok) await run(env, `UPDATE ${T.authUsers} SET age_ok = 1 WHERE id = ?`, user.id);
     if (body.username != null) {
       const name = normalizeUsername(body.username);
       if (!validUsername(name)) return json(request, { error: 'pilot names are 3–16 letters, numbers, or underscore' }, 400);
@@ -276,7 +294,7 @@ async function route(request, env, url) {
       }
       const taken = await userByUsername(env, name);
       if (taken && taken.id !== user.id) return json(request, { error: 'that name is taken' }, 409);
-      await run(env, 'UPDATE users SET username = ?, username_changed_at = ? WHERE id = ?', name, now(), user.id);
+      await run(env, `UPDATE ${T.authUsers} SET username = ?, username_changed_at = ? WHERE id = ?`, name, now(), user.id);
     }
     const fresh = await userById(env, user.id);
     return json(request, await mePayload(env, fresh));
@@ -289,22 +307,22 @@ async function route(request, env, url) {
     if (sq && sq.role === 'owner') {
       const next = await one(
         env,
-        `SELECT user_id FROM squadron_members WHERE squadron_id = ? AND user_id != ? ORDER BY joined_at ASC LIMIT 1`,
+        `SELECT user_id FROM ${T.socialMembers} WHERE squadron_id = ? AND user_id != ? ORDER BY joined_at ASC LIMIT 1`,
         sq.id,
         user.id,
       );
       if (next) {
-        await run(env, 'UPDATE squadrons SET owner_id = ? WHERE id = ?', next.user_id, sq.id);
-        await run(env, `UPDATE squadron_members SET role = 'owner' WHERE squadron_id = ? AND user_id = ?`, sq.id, next.user_id);
+        await run(env, `UPDATE ${T.socialSquadrons} SET owner_id = ? WHERE id = ?`, next.user_id, sq.id);
+        await run(env, `UPDATE ${T.socialMembers} SET role = 'owner' WHERE squadron_id = ? AND user_id = ?`, sq.id, next.user_id);
       } else {
-        await run(env, 'UPDATE squadrons SET dissolved = 1 WHERE id = ?', sq.id);
+        await run(env, `UPDATE ${T.socialSquadrons} SET dissolved = 1 WHERE id = ?`, sq.id);
       }
     }
-    await run(env, 'DELETE FROM squadron_members WHERE user_id = ?', user.id);
-    await run(env, 'DELETE FROM sessions WHERE user_id = ?', user.id);
-    await run(env, 'UPDATE users SET deleted = 1, username = NULL, email = ? WHERE id = ?', `deleted+${user.id}@invalid`, user.id);
-    await run(env, `UPDATE match_pilots SET callsign = 'deleted' WHERE user_id = ?`, user.id);
-    await run(env, `UPDATE sortie_history SET callsign = 'deleted' WHERE user_id = ?`, user.id);
+    await run(env, `DELETE FROM ${T.socialMembers} WHERE user_id = ?`, user.id);
+    await run(env, `DELETE FROM ${T.authSessions} WHERE user_id = ?`, user.id);
+    await run(env, `UPDATE ${T.authUsers} SET deleted = 1, username = NULL, email = ? WHERE id = ?`, `deleted+${user.id}@invalid`, user.id);
+    await run(env, `UPDATE ${T.matchPilots} SET callsign = 'deleted' WHERE user_id = ?`, user.id);
+    await run(env, `UPDATE ${T.progressSorties} SET callsign = 'deleted' WHERE user_id = ?`, user.id);
     await wipeIdent(env, user.id);
     return json(request, { ok: true }, 200, { 'set-cookie': sessionCookie('', true) });
   }
@@ -312,10 +330,10 @@ async function route(request, env, url) {
   if (path === '/api/presence' && method === 'POST') {
     const { user, error } = await requireUser(request, env);
     if (error) return error;
-    await run(env, 'UPDATE users SET last_seen = ? WHERE id = ?', now(), user.id);
+    if (shouldWrite(`seen:${user.id}`)) await run(env, `UPDATE ${T.authUsers} SET last_seen = ? WHERE id = ?`, now(), user.id);
     const pending = await all(
       env,
-      `SELECT i.token, i.kind, i.payload, u.username as from_name FROM invites i JOIN users u ON u.id = i.from_user
+      `SELECT i.token, i.kind, i.payload, u.username as from_name FROM ${T.socialInvites} i JOIN ${T.authUsers} u ON u.id = i.from_user
        WHERE i.accepted = 0 AND i.expires_at > ? AND (i.to_user = ? OR i.email = ?) ORDER BY i.created_at DESC LIMIT 8`,
       now(),
       user.id,
@@ -332,7 +350,7 @@ async function route(request, env, url) {
     if (!(await rate(env, `lookup:${user.id}`, 30, 60000))) return json(request, { error: 'easy does it — try again in a moment' }, 429);
     const found = await userByUsername(env, q);
     if (!found || found.id === user.id) return json(request, { user: null });
-    const blocked = await one(env, 'SELECT 1 FROM blocks WHERE user_id = ? AND blocked_id = ?', found.id, user.id);
+    const blocked = await one(env, `SELECT 1 FROM ${T.socialBlocks} WHERE user_id = ? AND blocked_id = ?`, found.id, user.id);
     if (blocked) return json(request, { user: null });
     const sq = await squadronOf(env, found.id);
     return json(request, { user: { id: found.id, username: found.username, tag: sq?.tag || '', last_seen: found.last_seen } });
@@ -343,7 +361,7 @@ async function route(request, env, url) {
     if (error) return error;
     const rows = await all(
       env,
-      `SELECT u.id, u.username, r.at FROM recent_contacts r JOIN users u ON u.id = r.other_id
+      `SELECT u.id, u.username, r.at FROM ${T.socialRecent} r JOIN ${T.authUsers} u ON u.id = r.other_id
        WHERE r.user_id = ? AND u.deleted = 0 ORDER BY r.at DESC LIMIT 20`,
       user.id,
     );
@@ -356,7 +374,7 @@ async function route(request, env, url) {
     const body = await readBody(request);
     const other = await userByUsername(env, normalizeUsername(body.username));
     if (!other) return json(request, { error: 'not found' }, 404);
-    await run(env, 'INSERT OR IGNORE INTO blocks (user_id, blocked_id, created_at) VALUES (?, ?, ?)', user.id, other.id, now());
+    await run(env, `INSERT OR IGNORE INTO ${T.socialBlocks} (user_id, blocked_id, created_at) VALUES (?, ?, ?)`, user.id, other.id, now());
     return json(request, { ok: true });
   }
 
@@ -370,11 +388,11 @@ async function route(request, env, url) {
     const name = String(body.name || '').trim().slice(0, 32);
     const tag = normalizeTag(body.tag);
     if (name.length < 3 || tag.length < 2) return json(request, { error: 'name and 2–4 letter tag required' }, 400);
-    const taken = await one(env, 'SELECT id FROM squadrons WHERE tag = ? AND dissolved = 0', tag);
+    const taken = await one(env, `SELECT id FROM ${T.socialSquadrons} WHERE tag = ? AND dissolved = 0`, tag);
     if (taken) return json(request, { error: 'tag taken' }, 409);
     const id = crypto.randomUUID();
-    await run(env, 'INSERT INTO squadrons (id, name, tag, owner_id, roster_cap, created_at) VALUES (?, ?, ?, ?, 16, ?)', id, name, tag, user.id, now());
-    await run(env, 'INSERT INTO squadron_members (squadron_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)', id, user.id, 'owner', now());
+    await run(env, `INSERT INTO ${T.socialSquadrons} (id, name, tag, owner_id, roster_cap, created_at) VALUES (?, ?, ?, ?, 16, ?)`, id, name, tag, user.id, now());
+    await run(env, `INSERT INTO ${T.socialMembers} (squadron_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)`, id, user.id, 'owner', now());
     const fresh = await userById(env, user.id);
     return json(request, await mePayload(env, fresh));
   }
@@ -385,9 +403,9 @@ async function route(request, env, url) {
     const parts = path.split('/');
     const sid = parts[3];
     const action = parts[4];
-    const sq = await one(env, 'SELECT * FROM squadrons WHERE id = ? AND dissolved = 0', sid);
+    const sq = await one(env, `SELECT * FROM ${T.socialSquadrons} WHERE id = ? AND dissolved = 0`, sid);
     if (!sq) return json(request, { error: 'squadron gone' }, 404);
-    const member = await one(env, 'SELECT * FROM squadron_members WHERE squadron_id = ? AND user_id = ?', sid, user.id);
+    const member = await one(env, `SELECT * FROM ${T.socialMembers} WHERE squadron_id = ? AND user_id = ?`, sid, user.id);
     const body = await readBody(request);
 
     if (action === 'invite') {
@@ -398,18 +416,18 @@ async function route(request, env, url) {
       if (!member) return json(request, { error: 'not a member' }, 400);
       const lastRated = await one(
         env,
-        `SELECT m.completed_at FROM match_pilots p JOIN matches m ON m.id = p.match_id
+        `SELECT m.completed_at FROM ${T.matchPilots} p JOIN ${T.matchRooms} m ON m.id = p.match_id
          WHERE p.user_id = ? AND m.mode = 'duel' AND m.ranked = 1 AND m.completed_at IS NOT NULL ORDER BY m.completed_at DESC LIMIT 1`,
         user.id,
       );
       if (lastRated && now() - lastRated.completed_at < 24 * 3600000) return json(request, { error: 'wait a day after a ranked duel' }, 400);
-      await run(env, 'DELETE FROM squadron_members WHERE squadron_id = ? AND user_id = ?', sid, user.id);
+      await run(env, `DELETE FROM ${T.socialMembers} WHERE squadron_id = ? AND user_id = ?`, sid, user.id);
       if (member.role === 'owner') {
-        const next = await one(env, 'SELECT user_id FROM squadron_members WHERE squadron_id = ? ORDER BY joined_at ASC LIMIT 1', sid);
+        const next = await one(env, `SELECT user_id FROM ${T.socialMembers} WHERE squadron_id = ? ORDER BY joined_at ASC LIMIT 1`, sid);
         if (next) {
-          await run(env, 'UPDATE squadrons SET owner_id = ? WHERE id = ?', next.user_id, sid);
-          await run(env, `UPDATE squadron_members SET role = 'owner' WHERE squadron_id = ? AND user_id = ?`, sid, next.user_id);
-        } else await run(env, 'UPDATE squadrons SET dissolved = 1 WHERE id = ?', sid);
+          await run(env, `UPDATE ${T.socialSquadrons} SET owner_id = ? WHERE id = ?`, next.user_id, sid);
+          await run(env, `UPDATE ${T.socialMembers} SET role = 'owner' WHERE squadron_id = ? AND user_id = ?`, sid, next.user_id);
+        } else await run(env, `UPDATE ${T.socialSquadrons} SET dissolved = 1 WHERE id = ?`, sid);
       }
       return json(request, { ok: true });
     }
@@ -417,16 +435,16 @@ async function route(request, env, url) {
       if (!member || member.role !== 'owner') return json(request, { error: 'owner only' }, 403);
       const other = await userByUsername(env, normalizeUsername(body.username));
       if (!other) return json(request, { error: 'not found' }, 404);
-      await run(env, 'DELETE FROM squadron_members WHERE squadron_id = ? AND user_id = ?', sid, other.id);
+      await run(env, `DELETE FROM ${T.socialMembers} WHERE squadron_id = ? AND user_id = ?`, sid, other.id);
       return json(request, { ok: true });
     }
     if (action === 'transfer') {
       if (!member || member.role !== 'owner') return json(request, { error: 'owner only' }, 403);
       const other = await userByUsername(env, normalizeUsername(body.username));
       if (!other) return json(request, { error: 'not found' }, 404);
-      await run(env, 'UPDATE squadrons SET owner_id = ? WHERE id = ?', other.id, sid);
-      await run(env, `UPDATE squadron_members SET role = 'owner' WHERE squadron_id = ? AND user_id = ?`, sid, other.id);
-      await run(env, `UPDATE squadron_members SET role = 'officer' WHERE squadron_id = ? AND user_id = ?`, sid, user.id);
+      await run(env, `UPDATE ${T.socialSquadrons} SET owner_id = ? WHERE id = ?`, other.id, sid);
+      await run(env, `UPDATE ${T.socialMembers} SET role = 'owner' WHERE squadron_id = ? AND user_id = ?`, sid, other.id);
+      await run(env, `UPDATE ${T.socialMembers} SET role = 'officer' WHERE squadron_id = ? AND user_id = ?`, sid, user.id);
       return json(request, { ok: true });
     }
     return json(request, { error: 'not found' }, 404);
@@ -437,7 +455,7 @@ async function route(request, env, url) {
     if (error) return error;
     const rows = await all(
       env,
-      `SELECT token, kind, payload, from_user, created_at FROM invites WHERE accepted = 0 AND expires_at > ? AND (to_user = ? OR email = ?)`,
+      `SELECT token, kind, payload, from_user, created_at FROM ${T.socialInvites} WHERE accepted = 0 AND expires_at > ? AND (to_user = ? OR email = ?)`,
       now(),
       user.id,
       user.email,
@@ -449,7 +467,7 @@ async function route(request, env, url) {
     const { user, error } = await requireUser(request, env);
     if (error) return error;
     const tok = path.split('/')[3];
-    const inv = await one(env, 'SELECT * FROM invites WHERE token = ?', tok);
+    const inv = await one(env, `SELECT * FROM ${T.socialInvites} WHERE token = ?`, tok);
     if (!inv || inv.accepted || inv.expires_at < now()) return json(request, { error: 'that invite is too old' }, 400);
     if (inv.email && inv.email !== user.email) {
       return json(request, { error: `this invite is for ${inv.email}` }, 403);
@@ -458,12 +476,12 @@ async function route(request, env, url) {
     if (inv.kind === 'squadron' && payload.squadronId) {
       const existing = await squadronOf(env, user.id);
       if (existing) return json(request, { error: 'already in a squadron' }, 400);
-      const sq = await one(env, 'SELECT * FROM squadrons WHERE id = ? AND dissolved = 0', payload.squadronId);
+      const sq = await one(env, `SELECT * FROM ${T.socialSquadrons} WHERE id = ? AND dissolved = 0`, payload.squadronId);
       if (!sq) return json(request, { error: 'squadron gone' }, 404);
-      const count = await one(env, 'SELECT COUNT(*) as n FROM squadron_members WHERE squadron_id = ?', sq.id);
+      const count = await one(env, `SELECT COUNT(*) as n FROM ${T.socialMembers} WHERE squadron_id = ?`, sq.id);
       const cap = sq.roster_cap || 16;
       if (count.n >= cap) return json(request, { error: 'roster full' }, 400);
-      await run(env, 'INSERT OR IGNORE INTO squadron_members (squadron_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)', sq.id, user.id, 'pilot', now());
+      await run(env, `INSERT OR IGNORE INTO ${T.socialMembers} (squadron_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)`, sq.id, user.id, 'pilot', now());
       await touchRecent(env, user.id, inv.from_user);
     }
     if ((inv.kind === 'hunt' || inv.kind === 'duel') && payload.matchId) {
@@ -483,17 +501,17 @@ async function route(request, env, url) {
       });
       const data = await res.json();
       if (!res.ok) return json(request, data, res.status);
-      await run(env, 'INSERT OR IGNORE INTO match_pilots (match_id, user_id, team, callsign) VALUES (?, ?, ?, ?)', payload.matchId, user.id, payload.team || 0, user.username);
+      await run(env, `INSERT OR IGNORE INTO ${T.matchPilots} (match_id, user_id, team, callsign) VALUES (?, ?, ?, ?)`, payload.matchId, user.id, payload.team || 0, user.username);
       await touchRecent(env, user.id, inv.from_user);
     }
-    await run(env, 'UPDATE invites SET accepted = 1, to_user = ? WHERE token = ?', user.id, tok);
+    await run(env, `UPDATE ${T.socialInvites} SET accepted = 1, to_user = ? WHERE token = ?`, user.id, tok);
     return json(request, { ok: true, kind: inv.kind, payload });
   }
 
   if (path === '/api/progress' && method === 'GET') {
     const { user, error } = await requireUser(request, env);
     if (error) return error;
-    const row = await one(env, 'SELECT * FROM progress_sync WHERE user_id = ?', user.id);
+    const row = await one(env, `SELECT * FROM ${T.progressSync} WHERE user_id = ?`, user.id);
     return json(request, {
       progress: row
         ? {
@@ -522,7 +540,7 @@ async function route(request, env, url) {
     const body = await readBody(request);
     await run(
       env,
-      'INSERT INTO reports (id, from_user, about_user, match_id, note, at) VALUES (?, ?, ?, ?, ?, ?)',
+      `INSERT INTO ${T.moderationReports} (id, from_user, about_user, match_id, note, at) VALUES (?, ?, ?, ?, ?, ?)`,
       crypto.randomUUID(),
       user.id,
       String(body.aboutUser || '').slice(0, 40),
@@ -539,7 +557,7 @@ async function route(request, env, url) {
     if (!user.username) return json(request, { error: 'pick a pilot name first' }, 400);
     const flags = await flagsOf(env);
     if (!mpEnabled(env) || flags.mp_enabled === '0' || !env.MATCH_ROOM) return json(request, { error: 'friends mode is taking a rest' }, 503);
-    const open = await one(env, `SELECT id FROM matches WHERE mode = 'hunt' AND status = 'lobby' AND created_at > ? ORDER BY created_at DESC LIMIT 1`, now() - 20 * 60000);
+    const open = await one(env, `SELECT id FROM ${T.matchRooms} WHERE mode = 'hunt' AND status = 'lobby' AND created_at > ? ORDER BY created_at DESC LIMIT 1`, now() - 20 * 60000);
     if (open) {
       const stub = roomStub(env, open.id);
       const sq = await squadronOf(env, user.id);
@@ -549,19 +567,19 @@ async function route(request, env, url) {
       });
       const data = await res.json();
       if (!res.ok) return json(request, data, res.status);
-      await run(env, 'INSERT OR IGNORE INTO match_pilots (match_id, user_id, team, callsign) VALUES (?, ?, ?, ?)', open.id, user.id, 0, user.username);
+      await run(env, `INSERT OR IGNORE INTO ${T.matchPilots} (match_id, user_id, team, callsign) VALUES (?, ?, ?, ?)`, open.id, user.id, 0, user.username);
       return json(request, { ok: true, matchId: open.id, joined: true });
     }
     const id = crypto.randomUUID();
     const sq = await squadronOf(env, user.id);
     await run(
       env,
-      `INSERT INTO matches (id, mode, ranked, difficulty, mission_id, status, host_id, created_at, seed) VALUES (?, 'hunt', 0, 'normal', 3, 'lobby', ?, ?, 0)`,
+      `INSERT INTO ${T.matchRooms} (id, mode, ranked, difficulty, mission_id, status, host_id, created_at, seed) VALUES (?, 'hunt', 0, 'normal', 3, 'lobby', ?, ?, 0)`,
       id,
       user.id,
       now(),
     );
-    await run(env, 'INSERT INTO match_pilots (match_id, user_id, team, callsign) VALUES (?, ?, 0, ?)', id, user.id, user.username);
+    await run(env, `INSERT INTO ${T.matchPilots} (match_id, user_id, team, callsign) VALUES (?, ?, 0, ?)`, id, user.id, user.username);
     const stub = roomStub(env, id);
     await stub.fetch('https://room/init', {
       method: 'POST',
@@ -595,7 +613,7 @@ async function route(request, env, url) {
     const missionId = Number(body.missionId) || (mode === 'duel' ? 6 : 3);
     await run(
       env,
-      `INSERT INTO matches (id, mode, ranked, difficulty, mission_id, status, host_id, created_at, seed) VALUES (?, ?, ?, ?, ?, 'lobby', ?, ?, 0)`,
+      `INSERT INTO ${T.matchRooms} (id, mode, ranked, difficulty, mission_id, status, host_id, created_at, seed) VALUES (?, ?, ?, ?, ?, 'lobby', ?, ?, 0)`,
       id,
       mode,
       ranked ? 1 : 0,
@@ -604,7 +622,7 @@ async function route(request, env, url) {
       user.id,
       now(),
     );
-    await run(env, 'INSERT INTO match_pilots (match_id, user_id, team, callsign) VALUES (?, ?, ?, ?)', id, user.id, body.team || 0, user.username);
+    await run(env, `INSERT INTO ${T.matchPilots} (match_id, user_id, team, callsign) VALUES (?, ?, ?, ?)`, id, user.id, body.team || 0, user.username);
     const skins = await entitlementsOf(env, user.id);
     const skinId = pickSkin(skins);
     const stub = roomStub(env, id);
@@ -622,10 +640,10 @@ async function route(request, env, url) {
       }),
     });
     if (mode === 'duel' && body.challengeTag) {
-      const other = await one(env, 'SELECT * FROM squadrons WHERE tag = ? AND dissolved = 0', normalizeTag(body.challengeTag));
+      const other = await one(env, `SELECT * FROM ${T.socialSquadrons} WHERE tag = ? AND dissolved = 0`, normalizeTag(body.challengeTag));
       if (!other) return json(request, { error: 'squadron not found' }, 404);
-      await run(env, 'INSERT INTO challenges (id, from_squadron, to_squadron, match_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?)', crypto.randomUUID(), sq?.id || '', other.id, id, 'open', now());
-      const officers = await all(env, `SELECT u.id, u.email, u.username FROM squadron_members m JOIN users u ON u.id = m.user_id WHERE m.squadron_id = ? AND m.role IN ('owner','officer')`, other.id);
+      await run(env, `INSERT INTO ${T.matchChallenges} (id, from_squadron, to_squadron, match_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?)`, crypto.randomUUID(), sq?.id || '', other.id, id, 'open', now());
+      const officers = await all(env, `SELECT u.id, u.email, u.username FROM ${T.socialMembers} m JOIN ${T.authUsers} u ON u.id = m.user_id WHERE m.squadron_id = ? AND m.role IN ('owner','officer')`, other.id);
       for (const off of officers) {
         await inviteSomeone(request, env, user, { username: off.username }, { kind: 'duel', payload: { matchId: id, team: 1 } });
       }
@@ -639,7 +657,7 @@ async function route(request, env, url) {
     const parts = path.split('/');
     const matchId = parts[3];
     const action = parts[4];
-    const match = await one(env, 'SELECT * FROM matches WHERE id = ?', matchId);
+    const match = await one(env, `SELECT * FROM ${T.matchRooms} WHERE id = ?`, matchId);
     if (!match) return json(request, { error: "that room isn't here" }, 404);
     const stub = roomStub(env, matchId);
     if (action === 'ticket') {
@@ -659,7 +677,7 @@ async function route(request, env, url) {
       });
       const data = await res.json();
       if (!res.ok) return json(request, data, res.status);
-      await run(env, 'INSERT OR IGNORE INTO match_pilots (match_id, user_id, team, callsign) VALUES (?, ?, ?, ?)', matchId, user.id, 0, user.username);
+      await run(env, `INSERT OR IGNORE INTO ${T.matchPilots} (match_id, user_id, team, callsign) VALUES (?, ?, ?, ?)`, matchId, user.id, 0, user.username);
       return json(request, { ok: true });
     }
     return json(request, { error: 'not found' }, 404);
@@ -678,18 +696,18 @@ async function route(request, env, url) {
       env,
       `SELECT COUNT(*) as sorties, COALESCE(SUM(kills),0) as kills, COALESCE(SUM(deaths),0) as deaths,
               COALESCE(SUM(ground),0) as ground, COALESCE(SUM(recon),0) as recon, COALESCE(SUM(score),0) as score
-       FROM sortie_history WHERE user_id = ?`,
+       FROM ${T.progressSorties} WHERE user_id = ?`,
       user.id,
     );
     const wins = await all(
       env,
-      `SELECT kind as mode, COUNT(*) as n FROM sortie_history WHERE user_id = ? AND win = 1 GROUP BY kind`,
+      `SELECT kind as mode, COUNT(*) as n FROM ${T.progressSorties} WHERE user_id = ? AND win = 1 GROUP BY kind`,
       user.id,
     );
-    const ribbons = await all(env, 'SELECT ribbon, at, match_id FROM ribbons WHERE user_id = ? ORDER BY at DESC LIMIT 24', user.id);
+    const ribbons = await all(env, `SELECT ribbon, at, match_id FROM ${T.progressRibbons} WHERE user_id = ? ORDER BY at DESC LIMIT 24`, user.id);
     const recent = await all(
       env,
-      `SELECT id, kind as mode, at as completed_at, kills, deaths, ground, score, win FROM sortie_history
+      `SELECT id, kind as mode, at as completed_at, kills, deaths, ground, score, win FROM ${T.progressSorties}
        WHERE user_id = ? ORDER BY at DESC LIMIT 16`,
       user.id,
     );
@@ -701,9 +719,9 @@ async function route(request, env, url) {
     const rows = await all(
       env,
       `SELECT h.callsign as name, SUM(h.kills) as kills, s.tag
-       FROM sortie_history h
-       LEFT JOIN squadron_members sm ON sm.user_id = h.user_id
-       LEFT JOIN squadrons s ON s.id = sm.squadron_id AND s.dissolved = 0
+       FROM ${T.progressSorties} h
+       LEFT JOIN ${T.socialMembers} sm ON sm.user_id = h.user_id
+       LEFT JOIN ${T.socialSquadrons} s ON s.id = sm.squadron_id AND s.dissolved = 0
        WHERE h.at >= ? AND h.kind IN ('hunt','duel') AND h.user_id IS NOT NULL
        GROUP BY h.user_id ORDER BY kills DESC LIMIT 20`,
       start,
@@ -727,10 +745,10 @@ async function route(request, env, url) {
     if (!item) return json(request, { error: 'unknown sku' }, 400);
     if (!env.STRIPE_SECRET) {
       if (env.MP_DEV === '0') return json(request, { error: 'the paint shop is not open yet' }, 503);
-      await run(env, 'INSERT OR IGNORE INTO entitlements (user_id, sku, at) VALUES (?, ?, ?)', user.id, item.sku, now());
+      await run(env, `INSERT OR IGNORE INTO ${T.shopEntitlements} (user_id, sku, at) VALUES (?, ?, ?)`, user.id, item.sku, now());
       if (item.sku === 'charter') {
         const sq = await squadronOf(env, user.id);
-        if (sq && sq.role === 'owner') await run(env, 'UPDATE squadrons SET roster_cap = 24 WHERE id = ?', sq.id);
+        if (sq && sq.role === 'owner') await run(env, `UPDATE ${T.socialSquadrons} SET roster_cap = 24 WHERE id = ?`, sq.id);
       }
       return json(request, { ok: true, granted: item.sku, dev: true });
     }
@@ -739,8 +757,8 @@ async function route(request, env, url) {
       headers: { authorization: `Bearer ${env.STRIPE_SECRET}`, 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         mode: 'payment',
-        success_url: `${originOf(request)}/?shop=ok`,
-        cancel_url: `${originOf(request)}/?shop=cancel`,
+        success_url: `${originOf(request)}${MOUNT}/?shop=ok`,
+        cancel_url: `${originOf(request)}${MOUNT}/?shop=cancel`,
         client_reference_id: user.id,
         'line_items[0][price_data][currency]': 'usd',
         'line_items[0][price_data][product_data][name]': item.name,
@@ -775,7 +793,7 @@ async function route(request, env, url) {
     }
     const sku = body?.data?.object?.metadata?.sku;
     const userId = body?.data?.object?.metadata?.user || body?.data?.object?.client_reference_id;
-    if (sku && userId) await run(env, 'INSERT OR IGNORE INTO entitlements (user_id, sku, at) VALUES (?, ?, ?)', userId, sku, now());
+    if (sku && userId) await run(env, `INSERT OR IGNORE INTO ${T.shopEntitlements} (user_id, sku, at) VALUES (?, ?, ?)`, userId, sku, now());
     return json(request, { ok: true });
   }
 
@@ -789,14 +807,14 @@ function pickSkin(list) {
 }
 
 async function inviteSomeone(request, env, user, body, { kind, payload }) {
-  const outstanding = await one(env, 'SELECT COUNT(*) as n FROM invites WHERE from_user = ? AND accepted = 0 AND expires_at > ?', user.id, now());
+  const outstanding = await one(env, `SELECT COUNT(*) as n FROM ${T.socialInvites} WHERE from_user = ? AND accepted = 0 AND expires_at > ?`, user.id, now());
   if (outstanding.n >= 20) return json(request, { error: 'too many outstanding invites' }, 429);
   let toUser = null;
   let email = '';
   if (body.username) {
     toUser = await userByUsername(env, normalizeUsername(body.username));
     if (!toUser) return json(request, { error: 'nobody by that name yet' }, 404);
-    const blocked = await one(env, 'SELECT 1 FROM blocks WHERE user_id = ? AND blocked_id = ?', toUser.id, user.id);
+    const blocked = await one(env, `SELECT 1 FROM ${T.socialBlocks} WHERE user_id = ? AND blocked_id = ?`, toUser.id, user.id);
     if (blocked) return json(request, { error: 'cannot invite' }, 403);
     email = toUser.email;
   } else {
@@ -807,7 +825,7 @@ async function inviteSomeone(request, env, user, body, { kind, payload }) {
   const tok = token(16);
   await run(
     env,
-    'INSERT INTO invites (token, kind, from_user, email, to_user, payload, created_at, expires_at, accepted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)',
+    `INSERT INTO ${T.socialInvites} (token, kind, from_user, email, to_user, payload, created_at, expires_at, accepted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
     tok,
     kind,
     user.id,
@@ -817,7 +835,7 @@ async function inviteSomeone(request, env, user, body, { kind, payload }) {
     now(),
     now() + 7 * 86400000,
   );
-  await run(env, 'INSERT INTO magic_links (token, email, created_at, expires_at, used) VALUES (?, ?, ?, ?, 0)', tok, email, now(), now() + 7 * 86400000);
+  await run(env, `INSERT INTO ${T.authMagicLinks} (token, email, created_at, expires_at, used) VALUES (?, ?, ?, ?, 0)`, tok, email, now(), now() + 7 * 86400000);
   const mail = inviteMail(originOf(request), tok, user.username || 'A pilot', kind);
   const sent = await sendMail(env, { to: email, ...mail });
   if (!sent.ok) await bumpCounter(env, 'mail_fail');

@@ -1,4 +1,5 @@
 import { PROTOCOL, NET, integrateFlight } from '../sim/index.js';
+import { apiPath } from '../paths.js';
 
 export class MpSession {
   constructor({ matchId, ticket, userId, planeId, onSnapshot, onLobby, onResult, onEvent, onClose }) {
@@ -19,7 +20,7 @@ export class MpSession {
 
   connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${proto}//${location.host}/api/match/${this.matchId}/ws?ticket=${encodeURIComponent(this.ticket)}`;
+    const url = `${proto}//${location.host}${apiPath(`/api/match/${this.matchId}/ws`)}?ticket=${encodeURIComponent(this.ticket)}`;
     this.ws = new WebSocket(url);
     this.ws.addEventListener('open', () => {
       this.status = 'open';

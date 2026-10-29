@@ -21,7 +21,7 @@ export async function sendMail(env, { to, subject, text, html }) {
 }
 
 export function magicMail(origin, token) {
-  const link = `${origin}/join?token=${token}`;
+  const link = `${origin}/wings-of-honor/?token=${token}`;
   return {
     subject: 'Your Wings of Honor flying link',
     text: `Tap to hop into Wings of Honor. This link works once, for a little while:\n${link}\n\nIf you didn't ask for this, you can ignore it.`,
@@ -29,7 +29,7 @@ export function magicMail(origin, token) {
 }
 
 export function inviteMail(origin, token, fromName, kind) {
-  const link = `${origin}/join?token=${token}`;
+  const link = `${origin}/wings-of-honor/?token=${token}`;
   return {
     subject: `${fromName} wants you in the sky`,
     text: `${fromName} invited you to fly in Wings of Honor.\nHop in here (this link lasts a week):\n${link}`,

@@ -32,6 +32,7 @@ import { getSession, bootAuth, api as authApi } from './auth.js';
 import { bootSocial, fillLobby } from './social.js';
 import { bootTelemetry, track, trackBoot, flush, acceptAge, ageAccepted, telemetryAllowed, getAid, bindUser } from './telemetry.js';
 import { MpSession } from './net/room.js';
+import { apiPath } from './paths.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('game-canvas');
@@ -2610,7 +2611,7 @@ document.addEventListener('visibilitychange', () => {
 
 async function api(path, options) {
   try {
-    const res = await fetch(path, options);
+    const res = await fetch(apiPath(path), options);
     if (!res.ok) throw new Error(String(res.status));
     return await res.json();
   } catch {
