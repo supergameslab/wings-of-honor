@@ -150,8 +150,9 @@ export default {
     if (url.pathname.startsWith(MOUNT) && env.ASSETS) {
       const dest = new URL(pathname + url.search, url.origin);
       const res = await env.ASSETS.fetch(new Request(dest, request));
+      const type = res.headers.get('content-type') || '';
+      if (!type.includes('text/html') || res.status !== 200) return res;
       try {
-        await ensureSchema(env);
         return applyGameSeo(res, await localSeo(env));
       } catch {
         return res;

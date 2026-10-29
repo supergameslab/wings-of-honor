@@ -15,9 +15,29 @@ function escapeHtml(value) {
 
 let turnstileId = null;
 
+function loadTurnstileScript() {
+  if (window.turnstile) return Promise.resolve();
+  if (window.__sglTurnstile) return window.__sglTurnstile;
+  window.__sglTurnstile = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('turnstile'));
+    document.head.appendChild(s);
+  });
+  return window.__sglTurnstile;
+}
+
 async function mountTurnstile() {
   const el = $('auth-turnstile');
-  if (!el || !window.turnstile || turnstileId != null) return;
+  if (!el || turnstileId != null) return;
+  try {
+    await loadTurnstileScript();
+  } catch {
+    return;
+  }
+  if (!window.turnstile) return;
   const health = await api('/api/health');
   const key = health.turnstileSiteKey || '';
   if (!key) return;

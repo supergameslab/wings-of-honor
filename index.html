@@ -20,6 +20,9 @@
     <link rel="icon" type="image/png" sizes="16x16" href="/wings-of-honor/favicon-16x16.png" />
     <link rel="apple-touch-icon" href="/wings-of-honor/apple-touch-icon.png" />
     <link rel="manifest" href="/wings-of-honor/site.webmanifest" />
+    <link rel="preload" as="image" href="/wings-of-honor/assets/title-art.webp" type="image/webp" fetchpriority="high" />
+    <link rel="preload" as="font" href="/wings-of-honor/fonts/barlow-condensed-800.woff2" type="font/woff2" crossorigin />
+    <link rel="preload" as="font" href="/wings-of-honor/fonts/dm-sans-400.woff2" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
@@ -379,7 +382,6 @@
         </div>
       </section>
     </main>
-    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" defer></script>
-    <script type="module" src="/src/main.js"></script>
+    <script type="module" src="/src/boot.js"></script>
   </body>
 </html>

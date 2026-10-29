@@ -199,9 +199,12 @@ function makeCloud(x, y, z, s = 1) {
   return g;
 }
 const clouds = [];
-for (let i = 0; i < 40; i++) {
-  const low = i % 7 === 0;
-  clouds.push(makeCloud((Math.random() - 0.5) * 1600, (low ? 70 : 110) + Math.random() * (low ? 40 : 160), (Math.random() - 0.5) * 1600, 0.7 + Math.random() * 1.35));
+function ensureClouds() {
+  if (clouds.length) return;
+  for (let i = 0; i < 40; i++) {
+    const low = i % 7 === 0;
+    clouds.push(makeCloud((Math.random() - 0.5) * 1600, (low ? 70 : 110) + Math.random() * (low ? 40 : 160), (Math.random() - 0.5) * 1600, 0.7 + Math.random() * 1.35));
+  }
 }
 
 function makeGroundTarget(x, z, kind = 'depot') {
@@ -1099,6 +1102,7 @@ function fillBriefing(mission) {
 }
 
 function resetGame() {
+  ensureClouds();
   const weather = world.applyMission(currentMission);
   cloudMat.opacity = weather.clouds;
   if (weather.cloud) cloudMat.color.set(weather.cloud);
@@ -1253,6 +1257,7 @@ function setMode(next) {
   $('pause-btn')?.classList.toggle('hidden', next === 'mp');
   $('kill-feed')?.classList.toggle('hidden', next !== 'mp');
   $('mp-living')?.classList.toggle('hidden', next !== 'mp');
+  if (next === 'playing' || next === 'mp' || next === 'paused' || next === 'forfeit') ensureLoop();
   if (next === 'playing' || next === 'mp') $('game-shell').focus();
   if (next !== 'playing' && next !== 'mp') {
     ui.targetMark?.classList.add('hidden');
@@ -2791,6 +2796,7 @@ function update(dt) {
 }
 
 let prev = performance.now();
+let loopOn = false;
 function loop(now) {
   requestAnimationFrame(loop);
   const dt = Math.min((now - prev) / 1000, 0.04);
@@ -2798,7 +2804,12 @@ function loop(now) {
   update(dt);
   renderer.render(scene, camera);
 }
-requestAnimationFrame(loop);
+function ensureLoop() {
+  if (loopOn) return;
+  loopOn = true;
+  prev = performance.now();
+  requestAnimationFrame(loop);
+}
 
 window.addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
@@ -2807,10 +2818,6 @@ window.addEventListener('resize', () => {
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, quality === 'HIGH' ? 1.65 : 1));
 });
 
-resetGame();
-player.position.set(0, Math.max(26, world.heightAt(0, 80) + 28), 80);
-camera.position.set(0, player.position.y + 12, 120);
-camera.lookAt(0, player.position.y - 4, 40);
 renderMissionList();
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {

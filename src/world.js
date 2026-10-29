@@ -1618,8 +1618,11 @@ export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
     horizonMat.bumpScale = terrainMat.bumpScale * 0.75;
   }
 
+  let sculpted = false;
+
   function sculpt(kind) {
     terrainType = kind;
+    sculpted = true;
     const pos = terrain.geometry.attributes.position;
     for (let i = 0; i < pos.count; i++) {
       pos.setY(i, heightAt(pos.getX(i), pos.getZ(i), kind));
@@ -1767,7 +1770,7 @@ export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
 
   function setQuality(q) {
     gfx = q;
-    scatter(terrainType);
+    if (sculpted) scatter(terrainType);
   }
 
   function update(dt, player) {
@@ -1825,7 +1828,6 @@ export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
     }
   }
 
-  sculpt('fields');
   applyWeather('clear');
 
   return {

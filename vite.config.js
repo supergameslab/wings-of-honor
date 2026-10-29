@@ -15,10 +15,18 @@ export default defineConfig({
   environments: {
     client: {
       build: {
+        target: 'es2022',
+        cssMinify: true,
+        modulePreload: true,
         rollupOptions: {
           input: {
             main: 'index.html',
             ops: 'ops.html',
+          },
+          output: {
+            manualChunks(id) {
+              if (id.includes('node_modules/three')) return 'three';
+            },
           },
         },
       },
