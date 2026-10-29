@@ -38,12 +38,14 @@ export function mergeProgress(server = {}, local = {}) {
   }
   const craftId = local.craftId || server.craftId || 'spitfire';
   const onboarded = Boolean(server.onboarded || local.onboarded);
+  const side = local.side || server.side || 'allied';
   return {
     unlocked: Math.min(100, Math.max(1, unlocked)),
     completed,
     stars,
     craftId,
     onboarded,
+    side: side === 'axis' ? 'axis' : 'allied',
     difficulty: local.difficulty || server.difficulty || 'normal',
     scores: { ...(server.scores || {}), ...(local.scores || {}) },
     rev: Math.max(Number(server.rev) || 0, Number(local.rev) || 0) + 1,
@@ -69,8 +71,14 @@ export function makePrologue() {
   };
 }
 
-export function nextCraftUnlock(unlocked, crafts) {
-  return (crafts || []).find((c) => !c.aiOnly && c.unlock > (unlocked || 1)) || null;
+export function nextCraftUnlock(unlocked, crafts, side) {
+  return (
+    (crafts || []).find((c) => {
+      if (c.aiOnly) return false;
+      if (side && (c.side || (c.axis ? 'axis' : 'allied')) !== side) return false;
+      return c.unlock > (unlocked || 1);
+    }) || null
+  );
 }
 
 export function nextAceMission(fromId, missions) {

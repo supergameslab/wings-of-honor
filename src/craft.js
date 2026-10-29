@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PLANES, planeById, isCraftUnlocked, cockpitGuns, COCKPIT_SIGHT, COCKPIT_CAM } from './sim/planes.js';
+import { PLANES, planeById, isCraftUnlocked, cockpitGuns, COCKPIT_SIGHT, COCKPIT_CAM, gunLayout, sightFor } from './sim/planes.js';
 
 export const CRAFTS = PLANES.filter((p) => !p.aiOnly);
 export const craftById = planeById;
@@ -385,6 +385,46 @@ function typeSpec(type, enemy) {
       fin: 'zero',
     };
   }
+  if (type === 'oscar') {
+    return {
+      fuse: [
+        [-4.05, 0.03],
+        [-3.88, 0.22],
+        [-3.68, 0.38],
+        [-3.15, 0.4],
+        [-2.1, 0.36],
+        [-1.0, 0.33],
+        [0.05, 0.31],
+        [1.0, 0.29],
+        [2.15, 0.22],
+        [3.2, 0.14],
+        [3.85, 0.07],
+        [4.12, 0.022],
+      ],
+      oval: 0.84,
+      wingY: 0.02,
+      wingZ: 0.08,
+      halfSpan: 5.45,
+      rootC: 1.82,
+      tipC: 0.82,
+      thick: 0.1,
+      dihedral: 0.09,
+      sweep: 0.04,
+      color: 0x7a8a58,
+      wing: 0x6a7a48,
+      blades: 2,
+      axis: true,
+      hinomaru: true,
+      radial: true,
+      map: camoMap,
+      spinner: 0xc4a24a,
+      canopyZ: 0.12,
+      canopyY: 0.38,
+      gearX: 1.55,
+      gearZ: 0.14,
+      fin: 'oscar',
+    };
+  }
   return {
     fuse: [
       [-4.45, 0.02],
@@ -546,6 +586,11 @@ function finGeometry(kind) {
     s.lineTo(0.84, 0);
     s.quadraticCurveTo(0.98, 0.48, 0.5, 1.08);
     s.quadraticCurveTo(0.1, 1.1, 0, 0.18);
+  } else if (kind === 'oscar') {
+    s.moveTo(0, 0);
+    s.lineTo(0.78, 0);
+    s.quadraticCurveTo(0.92, 0.42, 0.42, 1.18);
+    s.quadraticCurveTo(0.08, 1.2, 0, 0.16);
   } else {
     s.moveTo(0, 0);
     s.lineTo(0.98, 0.02);
@@ -671,6 +716,31 @@ const sharkTex = decalTex((x, S) => {
   x.fill();
 }, 160);
 
+function wingPoint(spec, s, chordT = 0.4) {
+  const span = s * spec.halfSpan;
+  const chord = spec.elliptical
+    ? spec.rootC * Math.sqrt(Math.max(0.06, 1 - s * s))
+    : spec.rootC + (spec.tipC - spec.rootC) * s;
+  let y = Math.tan(spec.dihedral || 0) * span;
+  let dihedral = spec.dihedral || 0;
+  if (spec.gull) {
+    if (s < 0.26) {
+      y = -0.58 * (s / 0.26);
+      dihedral = -Math.atan2(0.58, 0.26 * spec.halfSpan);
+    } else {
+      y = -0.58 + 0.92 * ((s - 0.26) / 0.74);
+      dihedral = Math.atan2(0.92, 0.74 * spec.halfSpan);
+    }
+  }
+  const zLe = -chord * 0.3 - (spec.sweep || 0) * span;
+  const t = Math.max(chordT, 0.001);
+  const yt =
+    spec.thick *
+    chord *
+    (0.2969 * Math.sqrt(t) - 0.126 * t - 0.3516 * t * t + 0.2843 * t ** 3 - 0.1036 * t ** 4);
+  return { span, y, z: zLe + t * chord, yt, dihedral };
+}
+
 function addDecal(parent, tex, pos, rot, size) {
   const m = new THREE.Mesh(
     new THREE.PlaneGeometry(size, size),
@@ -691,23 +761,21 @@ function addDecal(parent, tex, pos, rot, size) {
   return m;
 }
 
-function addMarkings(shell, spec, wingY, wingZ) {
-  const y = wingY + 0.09;
-  const z = wingZ + 0.05;
-  const span = spec.halfSpan * 0.42;
-  if (spec.hinomaru) {
-    for (const side of [-1, 1]) addDecal(shell, hinomaruTex, [side * span, y, z], [-Math.PI / 2, 0, 0], 0.72);
-    return;
+function addMarkings(shell, spec) {
+  const pt = wingPoint(spec, spec.gull ? 0.62 : 0.55, 0.38);
+  const y = spec.wingY + pt.y + pt.yt + 0.014;
+  const z = spec.wingZ + pt.z;
+  const tex = spec.hinomaru
+    ? hinomaruTex
+    : spec.axis
+      ? crossTex
+      : spec.shark || spec.fin === 'mustang' || spec.fin === 'hellcat'
+        ? starTex
+        : roundelTex;
+  const size = spec.hinomaru ? 0.72 : 0.7;
+  for (const side of [-1, 1]) {
+    addDecal(shell, tex, [side * pt.span, y, z], [-Math.PI / 2, 0, side * pt.dihedral], size);
   }
-  if (spec.axis) {
-    for (const side of [-1, 1]) addDecal(shell, crossTex, [side * span, y, z], [-Math.PI / 2, 0, 0], 0.7);
-    return;
-  }
-  if (spec.shark || spec.fin === 'mustang' || spec.fin === 'hellcat') {
-    for (const side of [-1, 1]) addDecal(shell, starTex, [side * span, y, z], [-Math.PI / 2, 0, 0], 0.7);
-    return;
-  }
-  for (const side of [-1, 1]) addDecal(shell, roundelTex, [side * span, y, z], [-Math.PI / 2, 0, 0], 0.7);
 }
 
 function gaugeFace(label) {
@@ -756,51 +824,234 @@ function makeGauge(label) {
   return g;
 }
 
-function makeCockpitInterior(type = 'spitfire') {
-  const guns = cockpitGuns(type);
-  const spec = typeSpec(type, false);
-  const g = new THREE.Group();
-  g.name = 'cockpit';
-  const floor = new THREE.Mesh(new THREE.BoxGeometry(0.98, 0.035, 0.95), mats.darkMetal);
-  floor.position.set(0, -0.2, 0.06);
-  floor.receiveShadow = true;
-  g.add(floor);
-  const bulk = new THREE.Mesh(new THREE.BoxGeometry(0.98, 0.42, 0.07), mats.darkMetal);
-  bulk.position.set(0, 0.02, 0.5);
-  g.add(bulk);
-  for (const side of [-1, 1]) {
-    const wall = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.32, 0.9), mats.darkMetal);
-    wall.position.set(side * 0.5, -0.02, 0.04);
-    g.add(wall);
+function pitTheme(type) {
+  const themes = {
+    spitfire: {
+      pit: 0x4a5348,
+      dash: 0x1c1e1a,
+      leather: 0x6a4030,
+      gauges: ['ASI', 'ALT', 'RPM', 'BOOST'],
+      stick: 'spade',
+      sight: 'aldis',
+      width: 0.94,
+      cam: { x: 0, y: 0.34, z: 0.16 },
+    },
+    p40: {
+      pit: 0x3a5a3c,
+      dash: 0x22261e,
+      leather: 0x4a3224,
+      gauges: ['ASI', 'ALT', 'RPM', 'FUEL'],
+      stick: 'us',
+      sight: 'n9',
+      width: 0.96,
+      cam: { x: 0, y: 0.33, z: 0.18 },
+    },
+    mustang: {
+      pit: 0x3c4a3c,
+      dash: 0x141618,
+      leather: 0x3a281c,
+      gauges: ['ASI', 'ALT', 'RPM', 'MP'],
+      stick: 'us',
+      sight: 'n9',
+      width: 1.0,
+      cam: { x: 0, y: 0.36, z: 0.2 },
+    },
+    hellcat: {
+      pit: 0x2a3a32,
+      dash: 0x121416,
+      leather: 0x2e241c,
+      gauges: ['ASI', 'ALT', 'RPM', 'FUEL'],
+      stick: 'us',
+      sight: 'n9',
+      width: 1.05,
+      cam: { x: 0, y: 0.35, z: 0.18 },
+    },
+    stuka: {
+      pit: 0x5a6248,
+      dash: 0x2a2c24,
+      leather: 0x8a6a38,
+      gauges: ['FAHRT', 'HOEHE', 'DREZ', 'KRAFT'],
+      stick: 'german',
+      sight: 'revi',
+      width: 1.02,
+      cam: { x: 0, y: 0.38, z: 0.22 },
+    },
+    bf109: {
+      pit: 0x3a403c,
+      dash: 0x1a1c1a,
+      leather: 0x4a3828,
+      gauges: ['FAHRT', 'HOEHE', 'DREZ', 'BOOST'],
+      stick: 'german',
+      sight: 'revi',
+      width: 0.82,
+      cam: { x: 0, y: 0.3, z: 0.22 },
+    },
+    zero: {
+      pit: 0x6a7a50,
+      dash: 0x2c2a22,
+      leather: 0x5a4030,
+      gauges: ['ASI', 'ALT', 'RPM', 'OIL'],
+      stick: 'ijn',
+      sight: 'type99',
+      width: 0.9,
+      cam: { x: 0, y: 0.32, z: 0.18 },
+    },
+    oscar: {
+      pit: 0x74805a,
+      dash: 0x2a281e,
+      leather: 0x6a4a32,
+      gauges: ['ASI', 'ALT', 'RPM', 'OIL'],
+      stick: 'ijn',
+      sight: 'type99',
+      width: 0.88,
+      cam: { x: 0, y: 0.32, z: 0.18 },
+    },
+  };
+  return themes[type] || themes.spitfire;
+}
+
+function addGunsight(g, kind, pos) {
+  const x = pos.x;
+  const y = pos.y;
+  const z = pos.z;
+  if (kind === 'revi') {
+    const house = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.1, 0.16), mats.darkMetal);
+    house.position.set(x, y - 0.04, z + 0.08);
+    g.add(house);
+    const glass = new THREE.Mesh(new THREE.PlaneGeometry(0.11, 0.09), mats.glass);
+    glass.position.set(x, y + 0.02, z);
+    g.add(glass);
+    const bead = new THREE.Mesh(new THREE.SphereGeometry(0.007, 8, 6), mat(0xf0c45a, 0.3, 0.2));
+    bead.position.set(x, y + 0.01, z - 0.01);
+    g.add(bead);
+    return;
   }
-  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.06, 0.28), mats.leather);
-  seat.position.set(0, -0.14, 0.22);
-  g.add(seat);
-  const dash = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.2, 0.38), mats.dash);
-  dash.position.set(0, 0.0, -0.26);
-  dash.rotation.x = -0.46;
-  dash.receiveShadow = true;
-  g.add(dash);
-  const labels = ['ALT', 'RPM', 'ASI', 'FUEL'];
-  const needles = [];
-  labels.forEach((label, i) => {
-    const gauge = makeGauge(label);
-    gauge.position.set([-0.42, -0.26, 0.26, 0.42][i], 0.1, -0.38);
-    gauge.rotation.x = -0.55;
-    gauge.scale.setScalar(1.18);
-    g.add(gauge);
-    needles.push(gauge.userData.needle);
-  });
-  g.userData.needles = needles;
+  if (kind === 'n9') {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.014, 0.12, 8), mats.darkMetal);
+    post.position.set(x, y - 0.08, z + 0.06);
+    g.add(post);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.08, 0.006, 8, 24), mats.metal);
+    ring.position.set(x, y, z);
+    g.add(ring);
+    const glass = new THREE.Mesh(new THREE.CircleGeometry(0.07, 20), mats.glass);
+    glass.position.set(x, y, z);
+    g.add(glass);
+    const bead = new THREE.Mesh(new THREE.SphereGeometry(0.008, 8, 6), mats.brass);
+    bead.position.set(x, y, z - 0.01);
+    g.add(bead);
+    return;
+  }
+  if (kind === 'type99') {
+    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.036, 0.22, 10), mats.darkMetal);
+    tube.rotation.x = Math.PI / 2;
+    tube.position.set(x, y - 0.02, z + 0.06);
+    g.add(tube);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.055, 0.005, 8, 18), mat(0xe8b86a, 0.4, 0.35));
+    ring.position.set(x, y, z);
+    g.add(ring);
+    const bead = new THREE.Mesh(new THREE.SphereGeometry(0.006, 8, 6), mat(0xe8b86a));
+    bead.position.set(x, y, z);
+    g.add(bead);
+    return;
+  }
+  const glass = new THREE.Mesh(new THREE.CircleGeometry(0.09, 22), mats.glass);
+  glass.position.set(x, y, z);
+  g.add(glass);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.006, 8, 24), mats.darkMetal);
+  ring.position.set(x, y, z);
+  g.add(ring);
+  const inner = new THREE.Mesh(new THREE.TorusGeometry(0.03, 0.003, 6, 16), mats.brass);
+  inner.position.set(x, y, z);
+  g.add(inner);
+  const bead = new THREE.Mesh(new THREE.SphereGeometry(0.007, 8, 6), mats.brass);
+  bead.position.set(x, y, z);
+  g.add(bead);
+}
+
+function makeStick(kind) {
   const stick = new THREE.Group();
   const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.02, 0.4, 8), mats.darkMetal);
   shaft.position.set(0, 0.08, 0);
   stick.add(shaft);
-  const grip = new THREE.Mesh(new THREE.SphereGeometry(0.034, 10, 8), mats.leather);
-  grip.position.set(0, 0.28, 0.01);
-  stick.add(grip);
+  if (kind === 'spade') {
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.05, 0.04), mats.leather);
+    grip.position.set(0, 0.28, 0.01);
+    stick.add(grip);
+  } else if (kind === 'german') {
+    const grip = new THREE.Mesh(new THREE.SphereGeometry(0.038, 10, 8), mats.leather);
+    grip.position.set(0, 0.28, 0.01);
+    stick.add(grip);
+    const horn = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.02, 0.02), mats.darkMetal);
+    horn.position.set(0, 0.3, 0.02);
+    stick.add(horn);
+  } else if (kind === 'ijn') {
+    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.022, 0.1, 8), mats.leather);
+    grip.position.set(0, 0.28, 0);
+    stick.add(grip);
+  } else {
+    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.026, 0.09, 8), mats.leather);
+    grip.position.set(0, 0.28, 0);
+    stick.add(grip);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.028, 8, 6), mats.leather);
+    head.position.set(0, 0.33, 0);
+    stick.add(head);
+  }
   stick.position.set(0, -0.16, 0.1);
   stick.rotation.x = 0.42;
+  return stick;
+}
+
+function makeCockpitInterior(type = 'spitfire') {
+  const guns = cockpitGuns(type);
+  const theme = pitTheme(type);
+  const pitMat = mat(theme.pit, 0.78, 0.08);
+  const dashMat = mat(theme.dash, 0.62, 0.18);
+  const seatMat = mat(theme.leather, 0.84, 0.04);
+  const w = theme.width;
+  const g = new THREE.Group();
+  g.name = 'cockpit';
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(w, 0.035, 0.95), pitMat);
+  floor.position.set(0, -0.2, 0.06);
+  floor.receiveShadow = true;
+  g.add(floor);
+  const bulk = new THREE.Mesh(new THREE.BoxGeometry(w, 0.42, 0.07), pitMat);
+  bulk.position.set(0, 0.02, 0.5);
+  g.add(bulk);
+  for (const side of [-1, 1]) {
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.32, 0.9), pitMat);
+    wall.position.set(side * (w * 0.5), -0.02, 0.04);
+    g.add(wall);
+  }
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.06, 0.28), seatMat);
+  seat.position.set(0, -0.14, 0.22);
+  g.add(seat);
+  const dash = new THREE.Mesh(new THREE.BoxGeometry(w - 0.06, type === 'bf109' ? 0.24 : 0.2, type === 'stuka' ? 0.44 : 0.38), dashMat);
+  dash.position.set(0, type === 'bf109' ? 0.04 : 0.0, -0.26);
+  dash.rotation.x = type === 'mustang' ? -0.38 : -0.46;
+  dash.receiveShadow = true;
+  g.add(dash);
+  const needles = [];
+  const xs = type === 'bf109' ? [-0.28, -0.1, 0.1, 0.28] : [-0.42, -0.26, 0.26, 0.42].map((v) => v * (w / 0.94));
+  theme.gauges.forEach((label, i) => {
+    const gauge = makeGauge(label);
+    gauge.position.set(xs[i], type === 'bf109' ? 0.14 : 0.1, -0.38);
+    gauge.rotation.x = -0.55;
+    gauge.scale.setScalar(type === 'hellcat' ? 1.28 : 1.18);
+    g.add(gauge);
+    needles.push(gauge.userData.needle);
+  });
+  if (type === 'mustang' || type === 'hellcat') {
+    ['OIL', 'TEMP'].forEach((label, i) => {
+      const extra = makeGauge(label);
+      extra.position.set([-0.12, 0.12][i], 0.02, -0.34);
+      extra.rotation.x = -0.5;
+      extra.scale.setScalar(0.82);
+      g.add(extra);
+      needles.push(extra.userData.needle);
+    });
+  }
+  g.userData.needles = needles;
+  const stick = makeStick(theme.stick);
   g.add(stick);
   g.userData.stick = stick;
   const bar = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.02, 0.03), mats.metal);
@@ -811,17 +1062,30 @@ function makeCockpitInterior(type = 'spitfire') {
     pedal.position.set(side * 0.16, -0.15, -0.12);
     g.add(pedal);
   }
-  const glass = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 0.16), mats.glass);
-  glass.position.set(COCKPIT_SIGHT.x, COCKPIT_SIGHT.y, COCKPIT_SIGHT.z);
-  g.add(glass);
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.006, 8, 24), mats.darkMetal);
-  ring.position.set(COCKPIT_SIGHT.x, COCKPIT_SIGHT.y, COCKPIT_SIGHT.z);
-  g.add(ring);
-  const bead = new THREE.Mesh(new THREE.SphereGeometry(0.008, 8, 6), spec.axis ? mats.metal : mats.brass);
-  bead.position.set(COCKPIT_SIGHT.x, COCKPIT_SIGHT.y, COCKPIT_SIGHT.z);
-  g.add(bead);
+  const throttle = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.018, 0.16, 8), type === 'stuka' ? mat(0xc4a24a) : mats.darkMetal);
+  throttle.position.set(-w * 0.38, 0.02, -0.02);
+  throttle.rotation.z = 0.4;
+  g.add(throttle);
+  if (type === 'bf109') {
+    const cannon = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.05, 0.55, 10), mats.darkMetal);
+    cannon.rotation.x = Math.PI / 2;
+    cannon.position.set(0, -0.08, -0.05);
+    g.add(cannon);
+  }
+  if (type === 'stuka') {
+    const dive = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.16, 0.04), mat(0xc4a24a));
+    dive.position.set(0.32, 0.02, 0.08);
+    g.add(dive);
+  }
+  if (type === 'spitfire') {
+    const compass = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.04, 16), mats.brass);
+    compass.position.set(0, -0.12, -0.18);
+    g.add(compass);
+  }
+  addGunsight(g, theme.sight || sightFor(type), COCKPIT_SIGHT);
   g.visible = false;
   g.userData.guns = guns;
+  g.userData.theme = theme;
   return g;
 }
 
@@ -842,9 +1106,9 @@ export function makeAircraft({ enemy = false, team = null, scale = 1, type = 'sp
   if (paint?.wing != null) spec.wing = paint.wing;
   const plane = planeById(type);
   const root = new THREE.Group();
-  root.scale.setScalar(scale * (type === 'stuka' ? 1.02 : type === 'zero' ? 0.96 : 1));
+  root.scale.setScalar(scale * (type === 'stuka' ? 1.02 : type === 'zero' || type === 'oscar' ? 0.96 : 1));
   root.rotation.order = 'YXZ';
-  const german = Boolean(spec.axis) || (enemy && team == null && (type === 'bf109' || type === 'stuka' || type === 'zero'));
+  const german = Boolean(spec.axis) || (enemy && team == null && (type === 'bf109' || type === 'stuka' || type === 'zero' || type === 'oscar'));
   spec.axis = german || spec.axis;
   const fuseMat = skinMat(spec.color, spec.map, { roughness: spec.roughness ?? 0.46, metalness: spec.metalness ?? 0.28 });
   const wingMat = skinMat(spec.wing, spec.map, {
@@ -875,7 +1139,7 @@ export function makeAircraft({ enemy = false, team = null, scale = 1, type = 'sp
   }
 
   add(shell, makeWingGeometry(spec), wingMat, [0, spec.wingY, spec.wingZ]);
-  addMarkings(shell, spec, spec.wingY + (spec.gull ? 0.02 : 0), spec.wingZ);
+  addMarkings(shell, spec);
 
   const stab = Object.assign({}, spec, {
     halfSpan: spec.halfSpan * 0.28,
@@ -894,19 +1158,33 @@ export function makeAircraft({ enemy = false, team = null, scale = 1, type = 'sp
   mast.rotation.z = 0.08;
 
   const guns = [];
-  const gunCount = Math.min(6, plane.guns || 2);
-  const span = spec.halfSpan * 0.38;
-  for (let i = 0; i < gunCount; i++) {
-    const side = i % 2 === 0 ? -1 : 1;
-    const out = 0.55 + Math.floor(i / 2) * 0.55;
-    const gun = add(
-      shell,
-      new THREE.CylinderGeometry(0.028, 0.022, 0.95, 8),
-      mats.gun,
-      [side * (span * 0.55 + out), spec.wingY + 0.02, spec.wingZ - spec.rootC * 0.28],
-      [Math.PI / 2, 0, 0],
-    );
-    guns.push(gun);
+  const layout = gunLayout(type);
+  if (layout.cowl) {
+    for (const side of [-1, 1]) {
+      guns.push(
+        add(
+          shell,
+          new THREE.CylinderGeometry(0.02, 0.014, 0.82, 8),
+          mats.gun,
+          [side * layout.cowl, 0.18, noseZ + 0.92],
+          [Math.PI / 2, 0, 0],
+        ),
+      );
+    }
+  }
+  for (const s of layout.wing || []) {
+    const pt = wingPoint(spec, s, 0.05);
+    for (const side of [-1, 1]) {
+      guns.push(
+        add(
+          shell,
+          new THREE.CylinderGeometry(0.026, 0.02, 1.05, 8),
+          mats.gun,
+          [side * pt.span, spec.wingY + pt.y - 0.02, spec.wingZ + pt.z - 0.38],
+          [Math.PI / 2, 0, 0],
+        ),
+      );
+    }
   }
 
   if (spec.scoop) {
@@ -1037,6 +1315,6 @@ export function makeAircraft({ enemy = false, team = null, scale = 1, type = 'sp
   root.userData.shell = shell;
   root.userData.type = type;
   root.userData.setGear = setGear;
-  root.userData.cockpitCam = { ...COCKPIT_CAM };
+  root.userData.cockpitCam = { ...(cockpit.userData.theme?.cam || COCKPIT_CAM) };
   return root;
 }

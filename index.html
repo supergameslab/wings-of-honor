@@ -95,7 +95,7 @@
           <div class="eyebrow">A WWII FLYING GAME</div>
           <h1>WINGS OF<br><span>HONOR</span></h1>
           <p class="tagline">FLY. FIGHT. WIN.</p>
-          <p class="intro">Hop in a Spitfire and fly. One hundred missions across five theatres, named aces, and a new Quick Mission every time. Cadet is gentle. Ace is a real scrap. Bank, fire, and have fun.</p>
+          <p class="intro">Hop in a fighter and fly. One hundred missions across five theatres. Pick Allied or Axis — the other side is waiting in the sky. Cadet is gentle. Ace is a real scrap.</p>
           <button id="play-btn" class="primary-btn">PLAY <span>↗</span></button>
           <button id="campaign-btn" class="primary-btn hidden">CAMPAIGN <span>↗</span></button>
           <button id="mess-btn" class="secondary-btn menu-quick hidden">PLAY WITH FRIENDS</button>
@@ -105,6 +105,10 @@
             <button data-diff="easy">CADET</button>
             <button data-diff="normal" class="active">PILOT</button>
             <button data-diff="hard">ACE</button>
+          </div>
+          <div class="diff-row" id="menu-side">
+            <button data-side="allied" class="active">ALLIED</button>
+            <button data-side="axis">AXIS</button>
           </div>
           <div class="menu-links">
             <a href="https://supergameslab.com/">SUPER GAMES LAB</a>
@@ -125,6 +129,10 @@
             <button data-diff="easy">CADET</button>
             <button data-diff="normal" class="active">PILOT</button>
             <button data-diff="hard">ACE</button>
+          </div>
+          <div class="diff-row" id="campaign-side">
+            <button data-side="allied" class="active">ALLIED</button>
+            <button data-side="axis">AXIS</button>
           </div>
           <div class="theater-jump" id="theater-jump"></div>
           <ol id="mission-list" class="mission-list"></ol>
@@ -178,7 +186,11 @@
         <div class="campaign-card hangar-card-wrap">
           <div class="eyebrow">YOUR HANGAR</div>
           <h2>Pick a plane.</h2>
-          <p class="brief-copy">The Spitfire is yours from the first flight. Bars show speed, turn, climb, guns, toughness, and dive. Finish missions to unlock more.</p>
+          <p class="brief-copy">Allied or Axis — the hangar follows the side you pick. Bars show speed, turn, climb, guns, toughness, and dive. Finish missions to unlock more.</p>
+          <div class="diff-row" id="hangar-side">
+            <button data-side="allied" class="active">ALLIED</button>
+            <button data-side="axis">AXIS</button>
+          </div>
           <div id="hangar-grid" class="hangar-grid"></div>
           <button id="hangar-back" class="secondary-btn">BACK</button>
         </div>

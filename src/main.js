@@ -25,7 +25,7 @@ import {
   usesFuel,
 } from './campaign.js';
 import { createWorld } from './world.js';
-import { FLIGHT, COMBAT, FUEL, clamp, damp, analogStick, integrateFlight, updateAi, createCraft, createAiCraft, forwardFromEuler, segmentHitsSphere, spawnBomb, stepBomb, predictLanding, predictBombImpact, bombHitsTarget, groundSpec, isStrafeable, isConvoy, stepConvoy, aaFireDir, aceById, acesFor, killScore, planeById, planeRatings, enemyCraftFor, stripOffset, homeNav, homeStripCenter, canCommitLand, shouldAutoLand, landRejectReason, stepLandMeter, landingCue, linedUp } from './sim/index.js';
+import { FLIGHT, COMBAT, FUEL, clamp, damp, analogStick, integrateFlight, updateAi, createCraft, createAiCraft, forwardFromEuler, segmentHitsSphere, spawnBomb, stepBomb, predictLanding, predictBombImpact, bombHitsTarget, groundSpec, isStrafeable, isConvoy, stepConvoy, aaFireDir, aceById, acesFor, killScore, planeById, planeRatings, enemyCraftFor, planeSide, planesForSide, defaultCraftId, sightFor, stripOffset, homeNav, homeStripCenter, canCommitLand, shouldAutoLand, landRejectReason, stepLandMeter, landingCue, linedUp } from './sim/index.js';
 import { drawVintageStaffMap, drawBriefingPhoto } from './briefingArt.js';
 import { makeAircraft, CRAFTS, craftById, isCraftUnlocked } from './craft.js';
 import { getSession, bootAuth, api as authApi } from './auth.js';
@@ -171,7 +171,10 @@ const materials = {
 
 const world = createWorld(scene, { sun, hemi, renderer, fill, rim });
 const progress = loadProgress();
-if (!isCraftUnlocked(craftById(progress.craftId), progress)) progress.craftId = 'spitfire';
+if (!progress.side) progress.side = 'allied';
+if (!isCraftUnlocked(craftById(progress.craftId), progress) || planeSide(craftById(progress.craftId)) !== progress.side) {
+  progress.craftId = defaultCraftId(progress.side);
+}
 let currentMission = missionById(Math.min(progress.unlocked, MISSIONS.length));
 let viewMode = localStorage.getItem('wings-honor-view') === 'cockpit' ? 'cockpit' : 'chase';
 
@@ -608,6 +611,7 @@ const _aim = new THREE.Vector3();
 const _ef = new THREE.Vector3();
 const _pf = new THREE.Vector3();
 const _right = new THREE.Vector3();
+const _gunPos = new THREE.Vector3();
 const _ndc = new THREE.Vector3();
 const _camFwd = new THREE.Vector3();
 const _bprev = new THREE.Vector3();
@@ -661,6 +665,7 @@ function setView(next = viewMode === 'cockpit' ? 'chase' : 'cockpit') {
     m.visible = !pit;
   });
   $('reticle')?.classList.remove('hidden');
+  applySight();
   const btn = $('view-btn');
   if (btn) btn.textContent = pit ? 'COCKPIT' : 'CHASE';
   if (pit && player) {
@@ -1005,7 +1010,7 @@ function spawnEnemy(spawn, spec, incoming = false) {
   const model = makeAircraft({
     enemy: true,
     scale: ace ? 0.9 : 0.82,
-    type: ace?.craft || enemyCraftFor(currentMission, enemies.length),
+    type: ace?.craft || enemyCraftFor(currentMission, enemies.length, progress.side),
     paint: ace ? { color: ace.color, wing: ace.wing } : null,
   });
   let x = spawn.x;
@@ -1016,11 +1021,15 @@ function spawnEnemy(spawn, spec, incoming = false) {
     const fwd = forwardFromEuler(flight.heading, 0);
     const rightX = Math.cos(flight.heading);
     const rightZ = -Math.sin(flight.heading);
-    const along = 130 + n * 24;
-    const side = (n % 2 === 0 ? 1 : -1) * (32 + n * 16);
+    const along = 92 + n * 16;
+    const side = (n % 2 === 0 ? 1 : -1) * (22 + n * 12);
     x = player.position.x + fwd.x * along + rightX * side;
     z = player.position.z + fwd.z * along + rightZ * side;
     heading = flight.heading + Math.PI + (n % 2 === 0 ? 0.18 : -0.18);
+  } else if (player) {
+    x += player.position.x;
+    z += player.position.z;
+    heading = Math.atan2(-(player.position.x - x), -(player.position.z - z));
   }
   const gy = world.heightAt(x, z);
   let y = gy + (spawn.agl ?? 22);
@@ -1052,7 +1061,7 @@ function fillBriefing(mission) {
   $('brief-title').textContent = mission.name;
   $('brief-meta').textContent = mission.onboard
     ? 'Kent · sunrise · Cadet · skip anytime'
-    : `${theaterLabel(mission.theater)} · ${mission.region} · ${terrainLabel(mission.terrain)} · ${weatherLabel(mission.weather)} · ${diff.label}`;
+    : `${(progress.side || 'allied') === 'axis' ? 'AXIS' : 'ALLIED'} · ${theaterLabel(mission.theater)} · ${mission.region} · ${terrainLabel(mission.terrain)} · ${weatherLabel(mission.weather)} · ${diff.label}`;
   $('brief-copy').textContent = mission.brief;
   const w = winFor(mission, mission.onboard ? 'easy' : progress.difficulty);
   const noun = targetNoun(mission);
@@ -1094,7 +1103,10 @@ function resetGame() {
   cloudMat.opacity = weather.clouds;
   if (weather.cloud) cloudMat.color.set(weather.cloud);
   const spec = currentMission.onboard ? { ...DIFFICULTY.easy, enemyHp: 1 } : DIFFICULTY[progress.difficulty];
-  const layout = layoutFor(currentMission, currentMission.onboard ? 'easy' : progress.difficulty, currentMission.huntPractice ? { pilotCount: 1 } : {});
+  const layout = layoutFor(currentMission, currentMission.onboard ? 'easy' : progress.difficulty, {
+    ...(currentMission.huntPractice ? { pilotCount: 1 } : {}),
+    side: progress.side || 'allied',
+  });
   if (homeField?.group) scene.remove(homeField.group);
   homeField = null;
   for (const obj of [
@@ -1117,8 +1129,11 @@ function resetGame() {
   releaseCamera();
   if (player) scene.remove(player);
   const chosen = craftById(progress.craftId);
-  playerPlane = isCraftUnlocked(chosen, progress) ? chosen : planeById('spitfire');
+  const side = progress.side || 'allied';
+  playerPlane =
+    isCraftUnlocked(chosen, progress) && planeSide(chosen) === side ? chosen : planeById(defaultCraftId(side));
   player = makeAircraft({ type: playerPlane.id });
+  applySight();
   let sx = 0;
   let sz = 80;
   const focus = layout.targets[0] || layout.waypoints[0];
@@ -1373,9 +1388,9 @@ function finish(win) {
       if (currentMission.id >= progress.unlocked && progress.unlocked < MISSIONS.length) progress.unlocked = currentMission.id + 1;
       saveProgress(progress);
       const more = currentMission.id < MISSIONS.length;
-      const craftUnlock = CRAFTS.find((c) => c.unlock === progress.unlocked);
-      const nextCraft = nextCraftUnlock(progress.unlocked - (craftUnlock ? 0 : 0), CRAFTS);
-      const tease = nextCraftUnlock(progress.unlocked, CRAFTS);
+      const craftUnlock = CRAFTS.find((c) => c.unlock === progress.unlocked && planeSide(c) === (progress.side || 'allied'));
+      const nextCraft = nextCraftUnlock(progress.unlocked - (craftUnlock ? 0 : 0), CRAFTS, progress.side);
+      const tease = nextCraftUnlock(progress.unlocked, CRAFTS, progress.side);
       const aceSoon = nextAceMission(currentMission.id, MISSIONS);
       $('result-copy').textContent = more
         ? `${currentMission.name} is done. Mission ${String(currentMission.id + 1).padStart(2, '0')} is unlocked.${craftUnlock ? ` Hangar: ${craftUnlock.name} is yours.` : ''}`
@@ -1612,16 +1627,26 @@ function shoot() {
   tone(280, 0.055, 'square', 0.055, -90);
   const fwd = forwardFromEuler(flight.heading, flight.pitch);
   const dir = v3(fwd.x, fwd.y, fwd.z);
-  const muzzle = viewMode === 'cockpit' ? 2.6 : 3.2;
-  const lift = viewMode === 'cockpit' ? 0.22 : 0.18;
-  const guns = playerPlane.guns || 2;
-  const sides = guns === 1 ? [0] : [-0.14, 0.14];
-  for (const side of sides) {
-    const start = player.position.clone().addScaledVector(dir, muzzle);
-    start.y += lift;
-    _right.set(Math.cos(flight.heading), 0, -Math.sin(flight.heading)).multiplyScalar(side);
-    start.add(_right);
-    addBullet(start, dir, 'player');
+  const gunMeshes = player?.userData.guns || [];
+  const n = Math.max(1, gunMeshes.length);
+  const dmg = 2 / n;
+  if (gunMeshes.length) {
+    for (const gun of gunMeshes) {
+      gun.getWorldPosition(_gunPos);
+      const start = _gunPos.clone().addScaledVector(dir, 0.55);
+      addBullet(start, dir, 'player', { damage: dmg });
+    }
+  } else {
+    const muzzle = viewMode === 'cockpit' ? 2.6 : 3.2;
+    const lift = viewMode === 'cockpit' ? 0.22 : 0.18;
+    const sides = n === 1 ? [0] : [-0.14, 0.14];
+    for (const side of sides) {
+      const start = player.position.clone().addScaledVector(dir, muzzle);
+      start.y += lift;
+      _right.set(Math.cos(flight.heading), 0, -Math.sin(flight.heading)).multiplyScalar(side);
+      start.add(_right);
+      addBullet(start, dir, 'player', { damage: dmg });
+    }
   }
   muzzleFlash();
 }
@@ -1889,9 +1914,32 @@ function setDifficulty(id) {
   if (!DIFFICULTY[id]) return;
   progress.difficulty = id;
   saveProgress(progress);
-  document.querySelectorAll('.diff-row button').forEach((btn) => {
+  document.querySelectorAll('.diff-row button[data-diff]').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.diff === id);
   });
+}
+
+function applySight() {
+  const el = $('reticle');
+  if (!el) return;
+  const kind = sightFor(playerPlane?.id || progress.craftId);
+  el.classList.remove('sight-aldis', 'sight-revi', 'sight-n9', 'sight-type99');
+  el.classList.add(`sight-${kind}`);
+}
+
+function setSide(id) {
+  const side = id === 'axis' ? 'axis' : 'allied';
+  progress.side = side;
+  const craft = craftById(progress.craftId);
+  if (!craft || planeSide(craft) !== side || !isCraftUnlocked(craft, progress)) {
+    progress.craftId = defaultCraftId(side);
+  }
+  saveProgress(progress);
+  document.querySelectorAll('[data-side]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.side === side);
+  });
+  applySight();
+  if ($('hangar-grid')?.childElementCount) renderHangar();
 }
 
 function renderMissionList() {
@@ -2024,10 +2072,14 @@ $('next-btn').addEventListener('click', () => {
   else beginBriefing(missionById(Math.min(MISSIONS.length, currentMission.id + 1)));
 });
 $('result-menu-btn').addEventListener('click', () => setMode('menu'));
-document.querySelectorAll('.diff-row button').forEach((btn) => {
+document.querySelectorAll('.diff-row button[data-diff]').forEach((btn) => {
   btn.addEventListener('click', () => setDifficulty(btn.dataset.diff));
 });
 setDifficulty(progress.difficulty);
+document.querySelectorAll('[data-side]').forEach((btn) => {
+  btn.addEventListener('click', () => setSide(btn.dataset.side));
+});
+setSide(progress.side || 'allied');
 $('how-btn').addEventListener('click', () => setMode('help'));
 $('help-close').addEventListener('click', () => setMode('menu'));
 $('quality-btn').addEventListener('click', () => {
@@ -2112,7 +2164,7 @@ function paintHangarThumb(cv, craft) {
 function renderHangar() {
   const grid = $('hangar-grid');
   if (!grid) return;
-  grid.innerHTML = CRAFTS.map((c) => {
+  grid.innerHTML = planesForSide(progress.side || 'allied').map((c) => {
     const open = isCraftUnlocked(c, progress);
     const selected = (progress.craftId || 'spitfire') === c.id;
     const ratings = planeRatings(c.id);
@@ -2138,6 +2190,10 @@ function renderHangar() {
       renderHangar();
       notify(craft.blurb ? craft.blurb.toUpperCase() : `${craft.name.toUpperCase()} READY`);
     });
+  });
+  document.querySelectorAll('[data-side]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.side === (progress.side || 'allied'));
+    btn.onclick = () => setSide(btn.dataset.side);
   });
 }
 
@@ -2355,7 +2411,16 @@ function updateEnemy(e, dt) {
   e.model.userData.prop.rotation.z += dt * 45;
   if (result.fire) {
     const dir = v3(result.forward.x, result.forward.y, result.forward.z);
-    addBullet(p.clone().addScaledVector(dir, 2.2), dir, 'enemy');
+    const guns = e.model.userData.guns || [];
+    if (guns.length) {
+      const dmg = (COMBAT.BULLET_DAMAGE || 8) * (2 / guns.length);
+      for (const gun of guns) {
+        gun.getWorldPosition(_gunPos);
+        addBullet(_gunPos.clone().addScaledVector(dir, 0.5), dir, 'enemy', { damage: dmg });
+      }
+    } else {
+      addBullet(p.clone().addScaledVector(dir, 2.2), dir, 'enemy');
+    }
   }
   if (result.ram) {
     damagePlayer(COMBAT.RAM_DAMAGE);
@@ -2537,7 +2602,7 @@ function update(dt) {
           if (!e.alive) continue;
           const pos = e.model.position;
           if (segmentHitsSphere(_bprev.x, _bprev.y, _bprev.z, b.mesh.position.x, b.mesh.position.y, b.mesh.position.z, pos.x, pos.y, pos.z, e.hitRadius || COMBAT.HIT_RADIUS_AI)) {
-            e.health -= 1;
+            e.health -= b.damage || 1;
             e.wasHit = true;
             hit = true;
             spawnExplosion(b.mesh.position);
@@ -2985,7 +3050,7 @@ function syncMpActors(snap) {
     const m = makeAircraft({
       enemy: true,
       scale: ace ? 0.9 : 0.82,
-      type: ace?.craft || enemyCraftFor(currentMission, mpAiMeshes.length),
+      type: ace?.craft || enemyCraftFor(currentMission, mpAiMeshes.length, progress.side),
       paint: ace ? { color: ace.color, wing: ace.wing } : null,
     });
     m.userData.aceId = ace?.id || null;
@@ -3004,7 +3069,7 @@ function syncMpActors(snap) {
       const neu = makeAircraft({
         enemy: true,
         scale: ace ? 0.9 : 0.82,
-        type: ace?.craft || enemyCraftFor(currentMission, i),
+        type: ace?.craft || enemyCraftFor(currentMission, i, progress.side),
         paint: ace ? { color: ace.color, wing: ace.wing } : null,
       });
       neu.userData.aceId = ace?.id || null;
@@ -3210,6 +3275,7 @@ checkApi();
 if (import.meta.env.DEV) {
   window.__openHangar = openHangar;
   window.__hangarStudio = hangarStudio;
+  window.__setSide = setSide;
   window.__quick = () => {
     beginBriefing(makeQuickSortie(progress));
     launchSortie();

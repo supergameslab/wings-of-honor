@@ -97,9 +97,16 @@ export function updateAi(e, player, dt, sampleHeight, rng = Math.random) {
   toPlayer.z /= dist;
   const facingPlayer = fwd.x * toPlayer.x + fwd.y * toPlayer.y + fwd.z * toPlayer.z;
   const pFwd = forwardFromEuler(player.heading, player.pitch);
+  const FIGHT = 92;
+  const LEASH = 168;
+  const closing = dist > FIGHT;
+  if (closing) {
+    e.state = 'attack';
+    e.breakTimer = 0;
+  }
   const playerOnTail = facingPlayer < -0.42 && dist < 44;
 
-  if (playerOnTail && e.breakTimer <= 0) {
+  if (!closing && playerOnTail && e.breakTimer <= 0) {
     e.state = 'break';
     e.breakTimer = (ace ? 0.82 : 0.55) + rng() * 0.18;
     e.breakSign = Math.sign(rng() - 0.5) || 1;
@@ -111,31 +118,44 @@ export function updateAi(e, player, dt, sampleHeight, rng = Math.random) {
   const eright = rightFromHeading(e.heading);
   const pright = rightFromHeading(player.heading);
   const weaveY = Math.sin(e.phase * 1.15) * 5.5;
-  if (e.state === 'break' && e.breakTimer > 0.1) {
-    aim = {
-      x: player.x + eright.x * e.breakSign * 34,
-      y: player.y + e.breakPitch * 16,
-      z: player.z + eright.z * e.breakSign * 34,
-    };
-  } else if (facingPlayer > 0.2 || dist > 70) {
+  if (closing || dist > LEASH * 0.7) {
     e.state = 'attack';
-    const lead = facingPlayer > 0.38 ? Math.min(ace ? 24 : 16, dist * 0.14) : 0;
-    aim = { x: player.x + pFwd.x * lead, y: player.y + 2 + weaveY, z: player.z + pFwd.z * lead };
+    const lead = facingPlayer > 0.55 && dist < FIGHT ? Math.min(ace ? 12 : 8, dist * 0.06) : 0;
+    aim = { x: player.x + pFwd.x * lead, y: player.y + 1.1 + weaveY * 0.28, z: player.z + pFwd.z * lead };
+  } else if (e.state === 'break' && e.breakTimer > 0.1) {
+    const out = 16;
+    aim = {
+      x: player.x + eright.x * e.breakSign * out + pFwd.x * 10,
+      y: player.y + e.breakPitch * 8,
+      z: player.z + eright.z * e.breakSign * out + pFwd.z * 10,
+    };
+  } else if (facingPlayer > 0.18) {
+    e.state = 'attack';
+    const lead = facingPlayer > 0.42 ? Math.min(ace ? 14 : 10, dist * 0.09) : 0;
+    aim = { x: player.x + pFwd.x * lead, y: player.y + 1.3 + weaveY * 0.4, z: player.z + pFwd.z * lead };
   } else {
     e.state = 'convert';
-    const sway = Math.sin(e.phase * 0.9 + e.turn) * (ace ? 20 : 12);
+    const sway = Math.sin(e.phase * 0.9 + e.turn) * (ace ? 9 : 6);
     aim = {
-      x: player.x + pFwd.x * -16 + pright.x * sway,
-      y: player.y + weaveY,
-      z: player.z + pFwd.z * -16 + pright.z * sway,
+      x: player.x + pFwd.x * -8 + pright.x * sway,
+      y: player.y + weaveY * 0.35,
+      z: player.z + pFwd.z * -8 + pright.z * sway,
     };
   }
 
-  const fly = flyTo(e, aim, dt, turnCap, sampleHeight, player);
+  const closeTurn = closing ? Math.min(1, turnCap + 0.24) : turnCap;
+  const fly = flyTo(e, aim, dt, closeTurn, sampleHeight, player);
   e.fireTimer -= dt;
   let fire = false;
   const toP = { x: player.x - e.x, y: player.y - e.y, z: player.z - e.z };
   const pDist = Math.max(0.001, Math.hypot(toP.x, toP.y, toP.z));
+  if (pDist > LEASH) {
+    const snap = Math.atan2(-(player.x - e.x), -(player.z - e.z));
+    e.heading += clamp(angleDiff(e.heading, snap), -2.6 * dt, 2.6 * dt);
+    e.turnCommit = 0;
+    e.state = 'attack';
+    e.breakTimer = 0;
+  }
   const cone = (fly.x * toP.x + fly.y * toP.y + fly.z * toP.z) / pDist;
   const aiRange = Math.max(COMBAT.FIRE_RANGE, 120);
   const aiCone = Math.min(COMBAT.FIRE_CONE, 0.76);

@@ -8,7 +8,7 @@ import { sortieKind, clampSortie } from './progress.js';
 import { stepConvoy, isStrafeable, groundSpec } from './combat.js';
 import { aceById, killScore, applyAceSpec, acesFor } from './aces.js';
 import { angleDiff, analogStick } from './math.js';
-import { planeById, handlingFor, cockpitGuns, COCKPIT_CAM, COCKPIT_SIGHT, planeRatings } from './planes.js';
+import { planeById, handlingFor, cockpitGuns, COCKPIT_CAM, COCKPIT_SIGHT, planeRatings, enemyCraftFor, gunStations, planeSide, defaultCraftId, sightFor, planesForSide } from './planes.js';
 
 function flatHeight() {
   return -42;
@@ -430,7 +430,9 @@ describe('combat and ai', () => {
     expect(planeById('spitfire').guns).toBe(8);
     expect(planeById('stuka').guns).toBe(2);
     expect(planeById('mustang').guns).toBe(6);
-    expect(planeById('bf109').guns).toBe(2);
+    expect(planeById('bf109').guns).toBe(4);
+    expect(planeById('zero').guns).toBe(4);
+    expect(planeById('oscar').guns).toBe(2);
   });
 
   it('cockpit guns match the hangar plane', () => {
@@ -462,7 +464,8 @@ describe('combat and ai', () => {
     expect(pip('hellcat', 'tough')).toBeGreaterThan(pip('bf109', 'tough'));
     expect(pip('stuka', 'dive')).toBeGreaterThan(pip('spitfire', 'dive'));
     expect(pip('mustang', 'speed')).toBe(5);
-    expect(pip('spitfire', 'turn')).toBe(5);
+    expect(pip('oscar', 'turn')).toBe(5);
+    expect(pip('spitfire', 'turn')).toBeGreaterThan(pip('mustang', 'turn'));
     planeRatings('spitfire').forEach((r) => {
       expect(r.pips).toBeGreaterThanOrEqual(1);
       expect(r.pips).toBeLessThanOrEqual(5);
@@ -528,6 +531,14 @@ describe('combat and ai', () => {
     expect(Math.abs(e.roll)).toBeLessThan(0.55);
   });
 
+  it('stays in the scrap instead of running to the map edge', () => {
+    const e = createAiCraft({ x: 240, y: 40, z: 0, heading: Math.PI / 2, fireTimer: 9 }, DIFFICULTY.normal);
+    const player = { x: 0, y: 40, z: 0, heading: 0, pitch: 0, roll: 0 };
+    for (let i = 0; i < 80; i++) updateAi(e, player, 0.05, flatHeight, () => 0.1);
+    expect(Math.hypot(e.x - player.x, e.z - player.z)).toBeLessThan(180);
+    expect(e.state).not.toBe('flee');
+  });
+
   it('shallow ground contact is a graze', () => {
     const c = createCraft({ x: 0, y: -38.2, z: 0, pitch: -0.06 });
     const r = integrateFlight(c, { pitch: 0 }, 0.05, () => -42);
@@ -552,6 +563,38 @@ describe('combat and ai', () => {
     const r = updateAi(e, { x: 0, y: 80, z: 0, heading: 0, pitch: 0 }, 0.05, flatHeight);
     expect(r.fire).toBe(false);
     expect(r.ram).toBe(false);
+  });
+
+  it('guns sit on the wing or cowl for each type', () => {
+    expect(gunStations('spitfire')).toHaveLength(8);
+    expect(gunStations('spitfire').every((g) => g.kind === 'wing')).toBe(true);
+    expect(gunStations('bf109').filter((g) => g.kind === 'cowl')).toHaveLength(2);
+    expect(gunStations('bf109').filter((g) => g.kind === 'wing')).toHaveLength(2);
+    expect(gunStations('zero').filter((g) => g.kind === 'cowl')).toHaveLength(2);
+    expect(gunStations('oscar').every((g) => g.kind === 'cowl')).toBe(true);
+    expect(sightFor('spitfire')).toBe('aldis');
+    expect(sightFor('bf109')).toBe('revi');
+    expect(sightFor('hellcat')).toBe('n9');
+    expect(sightFor('zero')).toBe('type99');
+  });
+
+  it('picks Japanese opposition in the Pacific and Allied craft when you fly Axis', () => {
+    expect(enemyCraftFor({ theater: 'pacific' }, 0, 'allied')).toBe('zero');
+    expect(enemyCraftFor({ theater: 'pacific' }, 2, 'allied')).toBe('oscar');
+    expect(enemyCraftFor({ theater: 'britain' }, 0, 'axis')).toBe('spitfire');
+    expect(enemyCraftFor({ theater: 'pacific' }, 0, 'axis')).toBe('p40');
+    expect(planeSide(planeById('zero'))).toBe('axis');
+    expect(defaultCraftId('axis')).toBe('bf109');
+    expect(planesForSide('axis').some((p) => p.id === 'oscar')).toBe(true);
+    expect(planesForSide('allied').every((p) => p.side === 'allied')).toBe(true);
+    const swapped = acesFor(missionById(20), { side: 'axis' });
+    expect(swapped.length).toBeGreaterThan(0);
+    expect(swapped.every((id) => aceById(id).side === 'allied')).toBe(true);
+  });
+
+  it('spawns scouts close enough to fight', () => {
+    const laid = layoutFor(missionById(1), 'normal');
+    expect(laid.enemies.every((e) => Math.hypot(e.x, e.z) <= 112.1)).toBe(true);
   });
 
   it('touch stick ignores a dead zone and clamps to a circle', () => {

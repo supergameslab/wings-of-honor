@@ -192,9 +192,10 @@ export function loadProgress() {
     const stars = raw.stars && typeof raw.stars === 'object' ? raw.stars : {};
     const onboarded = Boolean(raw.onboarded);
     const ribbons = Array.isArray(raw.ribbons) ? raw.ribbons : [];
-    return { difficulty, unlocked, completed, scores, craftId, stars, onboarded, ribbons };
+    const side = raw.side === 'axis' ? 'axis' : 'allied';
+    return { difficulty, unlocked, completed, scores, craftId, stars, onboarded, ribbons, side };
   } catch {
-    return { difficulty: 'normal', unlocked: 1, completed: [], scores: {}, craftId: 'spitfire', stars: {}, onboarded: false, ribbons: [] };
+    return { difficulty: 'normal', unlocked: 1, completed: [], scores: {}, craftId: 'spitfire', stars: {}, onboarded: false, ribbons: [], side: 'allied' };
   }
 }
 
@@ -462,13 +463,14 @@ export function layoutFor(mission, difficulty, opts = {}) {
       angle = Math.PI + (i - (fighters - 1) / 2) * 0.7 + (rng() - 0.5) * 0.25;
       dist = 85 + rng() * 90;
     }
+    dist = Math.min(dist, 112);
     const x = Math.sin(angle) * dist;
     const z = -Math.cos(angle) * dist;
     enemies.push({
       x,
       agl: 16 + rng() * 18 + wave * 6,
       z,
-      heading: Math.atan2(x, z) + (rng() - 0.5) * 0.48,
+      heading: Math.atan2(x, z) + (rng() - 0.5) * 0.16,
       wave: 0,
     });
   }

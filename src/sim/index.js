@@ -38,4 +38,4 @@ export {
 export { createAiCraft, updateAi } from './ai.js';
 export { ACES, aceById, acesFor, applyAceSpec, killScore } from './aces.js';
 export { SORTIE_KINDS, sortieKind, clampSortie, starRating, mergeProgress, makePrologue, nextCraftUnlock, nextAceMission } from './progress.js';
-export { PLANES, planeById, handlingFor, isCraftUnlocked, cockpitGuns, COCKPIT_SIGHT, COCKPIT_CAM, PLANE_RATING_TRAITS, planeRatings, enemyCraftFor } from './planes.js';
+export { PLANES, planeById, handlingFor, isCraftUnlocked, cockpitGuns, COCKPIT_SIGHT, COCKPIT_CAM, PLANE_RATING_TRAITS, planeRatings, enemyCraftFor, gunStations, gunLayout, planeSide, planesForSide, defaultCraftId, sightFor } from './planes.js';
