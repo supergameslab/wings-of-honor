@@ -1,13 +1,17 @@
 import * as THREE from 'three';
-import { makeParams, heightAt as terrainHeightAt, setHeightParams, paramsForMission } from './sim/height.js';
+import { makeParams, heightAt as terrainHeightAt, setHeightParams, paramsForMission, riverDistance, canalDistance, roadDistance, siteBlocked } from './sim/height.js';
 
 const SIZE = 2400;
 const HORIZON = 14000;
-const SEG = 160;
+const SEG = 192;
 const SKY_R = 8200;
 
 function saturate(v) {
   return Math.min(1, Math.max(0, v));
+}
+
+function posmod(v, m) {
+  return ((v % m) + m) % m;
 }
 
 function smoothstep(e0, e1, x) {
@@ -52,6 +56,45 @@ function worldXZ(x, z) {
   };
 }
 
+function fromRotated(rx, rz) {
+  return {
+    x: rx * params.cos + rz * params.sin,
+    z: -rx * params.sin + rz * params.cos,
+  };
+}
+
+function strokeWorldCurve(ctx, W, sampleOther, alongX, width, color, alpha, worldSpan = SIZE) {
+  ctx.beginPath();
+  let started = false;
+  const span = worldSpan * 0.98;
+  const step = 18;
+  if (alongX) {
+    for (let rx = -span; rx <= span; rx += step) {
+      const wpos = fromRotated(rx, sampleOther(rx));
+      const u = (wpos.x / worldSpan + 0.5) * W;
+      const v = (wpos.z / worldSpan + 0.5) * W;
+      if (!started) {
+        ctx.moveTo(u, v);
+        started = true;
+      } else ctx.lineTo(u, v);
+    }
+  } else {
+    for (let rz = -span; rz <= span; rz += step) {
+      const wpos = fromRotated(sampleOther(rz), rz);
+      const u = (wpos.x / worldSpan + 0.5) * W;
+      const v = (wpos.z / worldSpan + 0.5) * W;
+      if (!started) {
+        ctx.moveTo(u, v);
+        started = true;
+      } else ctx.lineTo(u, v);
+    }
+  }
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.globalAlpha = alpha;
+  ctx.stroke();
+}
+
 export function heightAt(x, z, terrain = 'fields') {
   return terrainHeightAt(x, z, terrain, params);
 }
@@ -61,8 +104,8 @@ function slopeAt(x, z, terrain) {
   return Math.abs(heightAt(x + 10, z, terrain) - h) + Math.abs(heightAt(x, z + 10, terrain) - h);
 }
 
-function landTexture(terrain) {
-  const W = 1024;
+function landTexture(terrain, worldSpan = SIZE, resolution) {
+  const W = resolution || (terrain === 'mountains' || terrain === 'city' || terrain === 'town' || terrain === 'sea' || terrain === 'island' ? 1024 : 2048);
   const c = document.createElement('canvas');
   c.width = W;
   c.height = W;
@@ -72,7 +115,6 @@ function landTexture(terrain) {
   const fieldA = [78, 112, 42];
   const fieldB = [58, 94, 36];
   const wheat = [196, 158, 58];
-  const fallow = [148, 118, 62];
   const hedge = [36, 58, 28];
   const dirt = [138, 104, 62];
   const trench = [78, 68, 52];
@@ -82,9 +124,6 @@ function landTexture(terrain) {
   const snow = [226, 230, 228];
   const sand = [194, 176, 128];
   const shallows = [70, 118, 120];
-  const duneA = [204, 170, 108];
-  const duneB = [180, 142, 88];
-  const duneC = [224, 196, 138];
   const savA = [142, 126, 60];
   const savB = [108, 118, 50];
   const savC = [168, 134, 70];
@@ -100,8 +139,8 @@ function landTexture(terrain) {
 
   for (let py = 0; py < W; py++) {
     for (let px = 0; px < W; px++) {
-      const wx = (px / W - 0.5) * SIZE;
-      const wz = (py / W - 0.5) * SIZE;
+      const wx = (px / W - 0.5) * worldSpan;
+      const wz = (py / W - 0.5) * worldSpan;
       const needH = terrain !== 'fields';
       const h = needH ? heightAt(wx, wz, terrain) : -42;
       const needSlope = terrain !== 'fields' && terrain !== 'sea' && terrain !== 'town' && terrain !== 'city';
@@ -136,17 +175,25 @@ function landTexture(terrain) {
         col = mix3(col, dirt, saturate(sl / 14) * 0.8);
         col = mix3(col, rock, saturate((sl - 9) / 14));
         if (h < -32) col = mix3(col, [58, 86, 42], 0.5);
-        const hedgeH = Math.abs(((rx + 1800) % 110) - 55);
-        col = mix3(col, hedge, (1 - smoothstep(1.4, 5.5, hedgeH)) * (sl < 10 ? 0.85 : 0.2));
+        const hedgeH = Math.min(posmod(rx + 1800, 118), 118 - posmod(rx + 1800, 118));
+        col = mix3(col, hedge, (1 - smoothstep(2.4, 7.8, hedgeH)) * (sl < 10 ? 0.92 : 0.22));
       } else if (terrain === 'sea' || terrain === 'island') {
         col = h > -40 ? mix3([86, 112, 58], sand, grain * 0.45) : mix3(shallows, [24, 56, 68], grain);
         if (h > -36) col = mix3(col, rock, 0.32);
         if (h < -44) col = mix3(col, [18, 48, 60], 0.4);
         if (terrain === 'island' && h > -38) col = mix3(col, jungB, 0.45 + grain * 0.2);
       } else if (terrain === 'desert') {
-        col = mix3(duneA, duneB, 0.3 + 0.45 * Math.sin(rx * 0.02 + rz * 0.01 + params.phase) + grain * 0.2);
-        col = mix3(col, duneC, speck * 0.28);
-        if (sl > 8) col = mix3(col, rockDark, saturate((sl - 8) / 16));
+        const dune = fbm(rx * 0.007, rz * 0.009);
+        const rip = 0.5 + 0.5 * Math.sin(rx * 0.09 + rz * 0.34 + dune * 5.2);
+        const rip2 = 0.5 + 0.5 * Math.sin(rx * 0.31 - rz * 0.08 + params.phase);
+        const band = 0.5 + 0.5 * Math.sin(rz * 0.018 + rx * 0.006 + params.phase);
+        col = mix3([168, 124, 72], [226, 186, 118], 0.18 + 0.7 * rip);
+        col = mix3(col, [240, 214, 154], rip2 * 0.4);
+        col = mix3(col, [148, 108, 64], band * 0.34);
+        col = mix3(col, [186, 142, 86], noise2(px * 0.42, py * 0.4) * 0.24);
+        const grainRip = 0.5 + 0.5 * Math.sin(py * 1.15 + px * 0.12 + rip * 4);
+        col = mix3(col, [col[0] * 0.68, col[1] * 0.7, col[2] * 0.6], grainRip * 0.22);
+        if (sl > 6) col = mix3(col, rockDark, saturate((sl - 6) / 14) * 0.72);
         const rail = Math.abs(rz - Math.sin(rx * 0.004 + params.phase) * 20);
         col = mix3(col, [72, 64, 54], 1 - smoothstep(1.2, 4.2, rail));
       } else if (terrain === 'savanna') {
@@ -157,11 +204,8 @@ function landTexture(terrain) {
         const track = Math.abs(rx - Math.cos(rz * 0.007) * 40);
         col = mix3(col, dirt, 1 - smoothstep(1.1, 3.8, track));
       } else if (terrain === 'jungle') {
-        const river = Math.abs(rz - params.riverOff - Math.sin(rx * params.riverFreq + params.phase) * params.riverAmp);
         col = mix3(jungA, jungB, fieldPick * 0.5 + grain * 0.5);
         if (speck > 0.7) col = mix3(col, jungC, 0.55);
-        if (river < 28) col = mix3(col, shallows, saturate(1 - river / 28));
-        if (river < 12) col = mix3(shallows, [48, 92, 70], grain);
       } else if (terrain === 'lake') {
         const wet = smoothstep(-44, -38, h);
         col = mix3(savB, savA, fieldPick * 0.55 + grain * 0.45);
@@ -204,36 +248,63 @@ function landTexture(terrain) {
         if (h < -43.5) col = mix3(col, shallows, saturate((-43.5 - h) / 1.6));
         if (h < -44.8) col = mix3([22, 54, 66], shallows, grain);
       } else {
-        const warp = fbm(rx * 0.0038, rz * 0.0038) * 48;
-        const warp2 = fbm(rx * 0.009 + 9, rz * 0.008) * 22;
-        const cellW = params.patchW * (1.45 + fieldPick * 0.55);
-        const cellH = params.patchH * (1.35 + grain * 0.4);
+        const warp = fbm(rx * 0.0024, rz * 0.0024) * 9;
+        const warp2 = fbm(rx * 0.0048 + 9, rz * 0.0046) * 7;
+        const cellW = params.patchW * 1.92;
+        const cellH = params.patchH * 1.86;
         const fx2 = Math.floor((rx + 1800 + warp) / cellW);
-        const fz2 = Math.floor((rz + 1800 - warp * 0.75 + warp2) / cellH);
+        const fz2 = Math.floor((rz + 1800 + warp2) / cellH);
         const pick2 = hash2(fx2, fz2);
-        const meadow = [72, 128, 52];
-        const lush = [110, 158, 58];
-        const darkGreen = [48, 92, 40];
-        const gold = [210, 176, 64];
-        const brown = [148, 112, 58];
-        const pale = [176, 168, 92];
-        col = pick2 < 0.14 ? meadow : pick2 < 0.34 ? lush : pick2 < 0.52 ? darkGreen : pick2 < 0.72 ? gold : pick2 < 0.88 ? brown : pale;
-        const edgeX = Math.abs(((rx + 1800 + warp) % cellW) - cellW / 2);
-        const edgeZ = Math.abs(((rz + 1800 - warp * 0.5) % cellH) - cellH / 2);
-        const hedgeAmt = Math.max(1 - smoothstep(1.1, 4.2, edgeX), 1 - smoothstep(1.1, 4.0, edgeZ));
-        col = mix3(col, hedge, hedgeAmt * 0.78);
-        const road = Math.abs(rz - Math.sin(rx * 0.0075 + params.phase) * 90);
-        const road2 = Math.abs(rx - Math.cos(rz * 0.006 + params.phase) * 70);
-        col = mix3(col, dirt, Math.max(1 - smoothstep(1.1, 4.4, road), 1 - smoothstep(1.0, 3.8, road2)) * 0.92);
-        const ditch = Math.abs(rz + params.riverOff - Math.sin(rx * 0.018) * 10);
-        col = mix3(col, trench, 1 - smoothstep(0.8, 3.2, ditch));
-        const river = Math.abs(rz - params.riverOff - Math.sin(rx * 0.01 + params.phase) * 42);
-        if (river < 22) col = mix3(col, [42, 102, 98], saturate(1 - river / 22) * 0.9);
-        if (river < 8) col = mix3([28, 78, 92], [64, 122, 118], grain);
+        const meadow = [52, 118, 40];
+        const lush = [118, 168, 52];
+        const darkGreen = [36, 82, 32];
+        const gold = [214, 168, 52];
+        const brown = [156, 108, 52];
+        const pale = [198, 178, 88];
+        const clay = [176, 120, 58];
+        col =
+          pick2 < 0.12
+            ? meadow
+            : pick2 < 0.28
+              ? lush
+              : pick2 < 0.42
+                ? darkGreen
+                : pick2 < 0.62
+                  ? gold
+                  : pick2 < 0.76
+                    ? brown
+                    : pick2 < 0.88
+                      ? pale
+                      : clay;
+        const localX = posmod(rx + 1800 + warp, cellW);
+        const localZ = posmod(rz + 1800 + warp2, cellH);
+        const furrowDir = pick2 > 0.5 ? localZ : localX;
+        const furrow = 0.5 + 0.5 * Math.sin(furrowDir * (pick2 > 0.7 ? 0.52 : 0.78));
+        if (pick2 >= 0.42) col = mix3(col, [col[0] * 0.62, col[1] * 0.64, col[2] * 0.55], furrow * 0.38);
+        else col = mix3(col, [col[0] * 0.82, col[1] * 0.88, col[2] * 0.74], (1 - furrow) * 0.2);
+        const borderX = Math.min(localX, cellW - localX);
+        const borderZ = Math.min(localZ, cellH - localZ);
+        const hedgeAmt = Math.max(1 - smoothstep(2.4, 7.2, borderX), 1 - smoothstep(2.2, 6.6, borderZ));
+        col = mix3(col, hedge, hedgeAmt * 0.94);
+        const road = roadDistance(wx, wz);
+        col = mix3(col, dirt, (1 - smoothstep(2.4, 9.5, road)) * 0.94);
+        const ditch = canalDistance(wx, wz);
+        col = mix3(col, trench, 1 - smoothstep(2.2, 8.5, ditch));
+        if (ditch < 5) col = mix3(col, [48, 92, 96], saturate(1 - ditch / 5) * 0.85);
+        const river = riverDistance(wx, wz);
+        if (river < 52) col = mix3(col, [86, 78, 54], saturate(1 - (river - 16) / 36) * 0.72);
+        if (river < 18) col = mix3(col, [42, 102, 98], saturate(1 - river / 18) * 0.95);
+        if (river < 9) col = mix3([28, 78, 92], [64, 122, 118], grain);
         const ham = Math.hypot(((rx + 400) % 150) - 75, ((rz + 280) % 128) - 64);
-        if (ham < 22 && pick2 > 0.28) col = mix3(col, roofTerra, (1 - ham / 22) * 0.82);
+        if (ham < 22 && pick2 > 0.28 && road > 16 && river > 28) col = mix3(col, roofTerra, (1 - ham / 22) * 0.82);
       }
-      col = mix3(col, [col[0] * 0.9, col[1] * 0.92, col[2] * 0.88], grain * 0.08 + speck * 0.03);
+      if (terrain === 'hills' || terrain === 'savanna' || terrain === 'jungle' || terrain === 'coast' || terrain === 'town') {
+        const river = riverDistance(wx, wz);
+        if (river < 52) col = mix3(col, [86, 78, 54], saturate(1 - (river - 16) / 36) * 0.7);
+        if (river < 18) col = mix3(col, [42, 102, 98], saturate(1 - river / 18) * 0.95);
+        if (river < 9) col = mix3([28, 78, 92], [64, 122, 118], grain);
+      }
+      col = mix3(col, [col[0] * 0.78, col[1] * 0.82, col[2] * 0.72], noise2(px * 0.7, py * 0.66) * 0.12 + speck * 0.07);
       const i = (py * W + px) * 4;
       d[i] = col[0];
       d[i + 1] = col[1];
@@ -242,7 +313,8 @@ function landTexture(terrain) {
     }
   }
   ctx.putImageData(img, 0, 0);
-  paintAerialParcels(ctx, W, terrain);
+  paintAerialParcels(ctx, W, terrain, worldSpan);
+  stampWaterways(ctx, W, terrain, worldSpan);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
@@ -251,90 +323,147 @@ function landTexture(terrain) {
   return t;
 }
 
-function paintAerialParcels(ctx, W, terrain) {
-  if (terrain !== 'fields' && terrain !== 'hills' && terrain !== 'coast') return;
-  const colors = ['#788b55', '#8c9861', '#a69d70', '#6f8150', '#9a9a67', '#65794d', '#b1a77a', '#818d5b', '#8e875e'];
-  for (let i = 0; i < 130; i++) {
-    const cx = hash2(i, params.seed) * W;
-    const cy = hash2(i + 17, params.seed + 2) * W;
-    const rx = 26 + hash2(i, 4) * 110;
-    const ry = 20 + hash2(i, 8) * 80;
-    ctx.beginPath();
-    for (let j = 0; j < 8; j++) {
-      const a = (j / 8) * Math.PI * 2;
-      const wob = 0.7 + hash2(i * 8 + j, 3) * 0.5;
-      const px = cx + Math.cos(a) * rx * wob;
-      const py = cy + Math.sin(a) * ry * wob;
-      if (j === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
-    }
-    ctx.closePath();
-    ctx.globalAlpha = 0.38 + hash2(i, 9) * 0.28;
-    ctx.fillStyle = colors[i % colors.length];
-    ctx.fill();
-    ctx.globalAlpha = 0.26;
-    ctx.strokeStyle = '#d0c69a';
-    ctx.lineWidth = 2 + hash2(i, 1) * 3;
-    ctx.stroke();
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.rotate((hash2(i, 6) - 0.5) * 0.75);
-    ctx.beginPath();
-    ctx.rect(-rx, -ry, rx * 2, ry * 2);
-    ctx.clip();
-    ctx.strokeStyle = i % 2 ? '#c0b783' : '#4e6940';
-    ctx.globalAlpha = 0.15;
-    ctx.lineWidth = 1.4;
-    for (let yy = -ry; yy < ry; yy += 6 + hash2(i, 14) * 4) {
+function metresPx(metres, W, worldSpan) {
+  return (metres / worldSpan) * W;
+}
+
+function paintAerialParcels(ctx, W, terrain, worldSpan = SIZE) {
+  if (terrain === 'desert') {
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 90; i++) {
+      const x = hash2(i, params.seed + 3) * W;
       ctx.beginPath();
-      ctx.moveTo(-rx, yy);
-      ctx.lineTo(rx, yy + hash2(i, 11) * 8);
+      ctx.moveTo(x, -8);
+      ctx.bezierCurveTo(
+        x + (hash2(i, 4) - 0.5) * 80,
+        W * 0.28,
+        x + (hash2(i, 5) - 0.5) * 110,
+        W * 0.62,
+        x + (hash2(i, 6) - 0.5) * 70,
+        W + 8,
+      );
+      ctx.strokeStyle = i % 3 === 0 ? '#c9a56a' : i % 3 === 1 ? '#8a6840' : '#e2c48a';
+      ctx.globalAlpha = 0.18 + hash2(i, 7) * 0.16;
+      ctx.lineWidth = 6 + hash2(i, 8) * 22;
       ctx.stroke();
     }
-    ctx.restore();
+    ctx.globalAlpha = 0.22;
+    for (let i = 0; i < 12000; i++) {
+      ctx.fillStyle = hash2(i, params.seed + 8) > 0.5 ? '#f0d9a8' : '#7a5a32';
+      ctx.fillRect(hash2(i, 30) * W, hash2(i, 31) * W, 1, 1);
+    }
+    ctx.globalAlpha = 1;
+    return;
   }
-  for (let r = 0; r < 6; r++) {
-    ctx.beginPath();
-    ctx.moveTo(hash2(r, 20) * W, hash2(r, 21) * W);
-    ctx.bezierCurveTo(
-      hash2(r, 22) * W,
-      hash2(r, 23) * W,
-      hash2(r, 24) * W,
-      hash2(r, 25) * W,
-      hash2(r, 26) * W,
-      hash2(r, 27) * W,
-    );
-    ctx.strokeStyle = '#6d674f';
-    ctx.lineWidth = W * 0.012;
-    ctx.globalAlpha = 0.48;
-    ctx.stroke();
-    ctx.strokeStyle = '#c0b393';
-    ctx.lineWidth = W * 0.008;
-    ctx.globalAlpha = 0.88;
-    ctx.stroke();
+  if (terrain !== 'fields' && terrain !== 'hills' && terrain !== 'coast') return;
+  const palette =
+    terrain === 'hills'
+      ? ['#4a6c28', '#8a9a44', '#c4a85a', '#5e7c34', '#b08a44', '#3e5c24', '#9a8c50', '#6e8840']
+      : terrain === 'coast'
+        ? ['#5a8234', '#c2ae6a', '#7a9844', '#b89a58', '#3f6624', '#d0c08a', '#6e7c40', '#a07840']
+        : ['#3a6c1c', '#8fb544', '#d4b246', '#2c5416', '#c49234', '#6aa030', '#e2c460', '#254818', '#a07430', '#7cac3c', '#c8bc78', '#4e7828'];
+  const cellW = 150;
+  const cellH = 171;
+  const half = worldSpan * 0.52;
+  const i0 = Math.floor(-half / cellW) - 1;
+  const i1 = Math.ceil(half / cellW) + 1;
+  const j0 = Math.floor(-half / cellH) - 1;
+  const j1 = Math.ceil(half / cellH) + 1;
+  const hedgePx = Math.max(1.1, metresPx(4.2, W, worldSpan));
+  ctx.globalAlpha = 1;
+  for (let j = j0; j <= j1; j++) {
+    for (let i = i0; i <= i1; i++) {
+      const wx = i * cellW;
+      const wz = j * cellH;
+      const u = (wx / worldSpan + 0.5) * W;
+      const v = (wz / worldSpan + 0.5) * W;
+      const rw = metresPx(cellW, W, worldSpan) * (0.98 + hash2(i, j + 11) * 0.16);
+      const rh = metresPx(cellH, W, worldSpan) * (0.96 + hash2(i + 2, j) * 0.18);
+      const ox = (hash2(i + 40, j + params.seed) - 0.5) * rw * 0.16;
+      const oz = (hash2(i + 9, j + 4) - 0.5) * rh * 0.14;
+      ctx.save();
+      ctx.translate(u + ox, v + oz);
+      ctx.rotate((hash2(i, j + 6) - 0.5) * 0.05);
+      ctx.fillStyle = palette[Math.abs((i * 13 + j * 7 + (params.seed | 0)) % palette.length)];
+      ctx.fillRect(-rw / 2, -rh / 2, rw, rh);
+      ctx.strokeStyle = '#1a2812';
+      ctx.lineWidth = hedgePx;
+      ctx.strokeRect(-rw / 2, -rh / 2, rw, rh);
+      if (rw > 22) {
+        ctx.beginPath();
+        ctx.rect(-rw / 2, -rh / 2, rw, rh);
+        ctx.clip();
+        const ploughed = hash2(i, j + 14) > 0.38;
+        ctx.strokeStyle = ploughed ? 'rgba(92,68,28,0.38)' : 'rgba(28,48,18,0.3)';
+        ctx.lineWidth = 1.2;
+        const gap = 3.6 + hash2(i, j + 18) * 2.4;
+        if (hash2(i, j + 3) > 0.5) {
+          for (let yy = -rh / 2; yy < rh / 2; yy += gap) {
+            ctx.beginPath();
+            ctx.moveTo(-rw / 2, yy);
+            ctx.lineTo(rw / 2, yy);
+            ctx.stroke();
+          }
+        } else {
+          for (let xx = -rw / 2; xx < rw / 2; xx += gap) {
+            ctx.beginPath();
+            ctx.moveTo(xx, -rh / 2);
+            ctx.lineTo(xx, rh / 2);
+            ctx.stroke();
+          }
+        }
+      }
+      ctx.restore();
+    }
   }
-  ctx.beginPath();
-  ctx.moveTo(W * 0.78, -6);
-  ctx.bezierCurveTo(W * 0.7, W * 0.14, W * 0.86, W * 0.22, W * 0.73, W * 0.37);
-  ctx.bezierCurveTo(W * 0.62, W * 0.5, W * 0.74, W * 0.6, W * 0.61, W * 0.71);
-  ctx.bezierCurveTo(W * 0.55, W * 0.81, W * 0.65, W * 0.9, W * 0.54, W * 1.04);
-  ctx.strokeStyle = '#786f53';
-  ctx.lineWidth = W * 0.04;
-  ctx.globalAlpha = 0.5;
-  ctx.stroke();
-  ctx.strokeStyle = '#718f98';
-  ctx.lineWidth = W * 0.03;
-  ctx.globalAlpha = 0.9;
-  ctx.stroke();
-  ctx.globalAlpha = 0.08;
-  for (let i = 0; i < 8000; i++) {
-    ctx.fillStyle = hash2(i, params.seed + 8) > 0.5 ? '#e4d8ad' : '#253e2c';
-    ctx.fillRect(hash2(i, 30) * W, hash2(i, 31) * W, 1 + hash2(i, 32) * 2, 1);
+  ctx.globalAlpha = 0.16;
+  const speckle = worldSpan > SIZE * 1.5 ? 4000 : 9000;
+  for (let i = 0; i < speckle; i++) {
+    ctx.fillStyle = hash2(i, params.seed + 8) > 0.5 ? '#efe3b4' : '#1c3224';
+    ctx.fillRect(hash2(i, 30) * W, hash2(i, 31) * W, 1, 1);
   }
   ctx.globalAlpha = 1;
 }
 
-function bumpTexture() {
+function stampWaterways(ctx, W, terrain, worldSpan = SIZE) {
+  if (terrain === 'sea' || terrain === 'island' || terrain === 'desert' || terrain === 'mountains' || terrain === 'lake') return;
+  const img = ctx.getImageData(0, 0, W, W);
+  const d = img.data;
+  const hasCanal = terrain === 'fields' || terrain === 'hills' || terrain === 'town' || terrain === 'coast' || terrain === 'savanna';
+  const dirt = [138, 104, 62];
+  const trench = [78, 68, 52];
+  for (let py = 0; py < W; py++) {
+    for (let px = 0; px < W; px++) {
+      const wx = (px / W - 0.5) * worldSpan;
+      const wz = (py / W - 0.5) * worldSpan;
+      const i = (py * W + px) * 4;
+      let col = [d[i], d[i + 1], d[i + 2]];
+      const grain = fbm(wx * 0.045, wz * 0.045);
+      if (terrain !== 'city') {
+        const road = roadDistance(wx, wz);
+        col = mix3(col, dirt, (1 - smoothstep(2.4, 10, road)) * 0.94);
+        if (hasCanal) {
+          const ditch = canalDistance(wx, wz);
+          col = mix3(col, trench, 1 - smoothstep(2.4, 11, ditch));
+          if (ditch < 6) col = mix3(col, [48, 92, 96], saturate(1 - ditch / 6) * 0.88);
+        }
+      }
+      const river =
+        terrain === 'city'
+          ? Math.abs(wz - params.cityZ * 0.15 - params.riverOff * 0.35 - Math.sin((wx - params.cityX) * params.riverFreq + params.phase) * params.riverAmp)
+          : riverDistance(wx, wz);
+      if (river < 155) col = mix3(col, [92, 82, 54], saturate(1 - (river - 52) / 103) * 0.52);
+      if (river < 52) col = mix3(col, [42, 102, 98], saturate(1 - (river - 24) / 28) * 0.92);
+      if (river < 24) col = mix3([26, 74, 90], [58, 118, 116], grain);
+      d[i] = col[0];
+      d[i + 1] = col[1];
+      d[i + 2] = col[2];
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+function bumpTexture(kind = 'fields') {
   const W = 256;
   const c = document.createElement('canvas');
   c.width = W;
@@ -344,17 +473,100 @@ function bumpTexture() {
   for (let i = 0; i < W * W; i++) {
     const px = i % W;
     const py = (i / W) | 0;
-    const v = (fbm(px * 0.12, py * 0.12) * 210 + noise2(px * 0.4, py * 0.4) * 40) | 0;
+    let v;
+    if (kind === 'desert') {
+      v = 128 + Math.sin(py * 0.95 + Math.sin(px * 0.08) * 4.2) * 72 + fbm(px * 0.14, py * 0.12) * 36;
+    } else if (kind === 'fields' || kind === 'hills' || kind === 'coast') {
+      v = 128 + Math.sin(py * 1.55) * 64 + noise2(px * 0.4, py * 0.4) * 26;
+    } else {
+      v = fbm(px * 0.12, py * 0.12) * 210 + noise2(px * 0.4, py * 0.4) * 40;
+    }
     const o = i * 4;
-    img.data[o] = img.data[o + 1] = img.data[o + 2] = v;
+    img.data[o] = img.data[o + 1] = img.data[o + 2] = Math.max(0, Math.min(255, v)) | 0;
     img.data[o + 3] = 255;
   }
   ctx.putImageData(img, 0, 0);
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.repeat.set(18, 18);
-  t.anisotropy = 4;
+  const tiles = kind === 'desert' ? 56 : kind === 'fields' || kind === 'hills' || kind === 'coast' ? 42 : 24;
+  t.repeat.set(tiles, tiles);
+  t.anisotropy = 8;
   return t;
+}
+
+function groundDetailTexture(kind = 'fields') {
+  const W = 256;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = W;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(W, W);
+  const d = img.data;
+  for (let py = 0; py < W; py++) {
+    for (let px = 0; px < W; px++) {
+      const i = (py * W + px) * 4;
+      const n = noise2(px * 0.37, py * 0.35);
+      const n2 = noise2(px * 0.9 + 4, py * 0.86);
+      if (kind === 'desert') {
+        const rip = 0.5 + 0.5 * Math.sin(py * 0.88 + Math.sin(px * 0.09) * 3.1);
+        const g = 0.62 + n * 0.22 + rip * 0.22 + n2 * 0.08;
+        d[i] = Math.min(255, g * 1.12 * 255);
+        d[i + 1] = Math.min(255, g * 0.9 * 255);
+        d[i + 2] = Math.min(255, g * 0.62 * 255);
+      } else if (kind === 'jungle') {
+        const g = 0.72 + n * 0.2 + n2 * 0.1;
+        d[i] = g * 0.55 * 255;
+        d[i + 1] = g * 255;
+        d[i + 2] = g * 0.48 * 255;
+      } else {
+        const streak = 0.5 + 0.5 * Math.sin(py * 2.15 + n * 3);
+        const g = 0.7 + n * 0.18 + streak * 0.16 + n2 * 0.08;
+        d[i] = Math.min(255, g * 0.9 * 255);
+        d[i + 1] = Math.min(255, g * 255);
+        d[i + 2] = Math.min(255, g * 0.55 * 255);
+      }
+      d[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = 8;
+  t.needsUpdate = true;
+  return t;
+}
+
+function attachGroundDetail(mat, repeat) {
+  const u = {
+    detailMap: { value: groundDetailTexture('fields') },
+    detailRepeat: { value: repeat },
+    detailAmt: { value: 0.5 },
+  };
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.detailMap = u.detailMap;
+    shader.uniforms.detailRepeat = u.detailRepeat;
+    shader.uniforms.detailAmt = u.detailAmt;
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+uniform sampler2D detailMap;
+uniform float detailRepeat;
+uniform float detailAmt;`,
+      )
+      .replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+#ifdef USE_MAP
+  vec3 dtl = texture2D(detailMap, vMapUv * detailRepeat).rgb;
+  diffuseColor.rgb *= mix(vec3(1.0), dtl * 1.12, detailAmt);
+#endif
+`,
+      );
+  };
+  mat.customProgramCacheKey = () => 'ground-detail-v1';
+  return u;
 }
 
 function waterTexture() {
@@ -646,32 +858,34 @@ function makeChurch() {
 export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
   const geo = new THREE.PlaneGeometry(SIZE, SIZE, SEG, SEG);
   geo.rotateX(-Math.PI / 2);
-  const bump = bumpTexture();
+  const bump = bumpTexture('fields');
   const terrainMat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
-    roughness: 0.88,
+    roughness: 0.92,
     metalness: 0,
     bumpMap: bump,
-    bumpScale: 0.72,
-    envMapIntensity: 0.18,
+    bumpScale: 1.25,
+    envMapIntensity: 0.16,
   });
+  const terrainDetail = attachGroundDetail(terrainMat, 84);
   const terrain = new THREE.Mesh(geo, terrainMat);
   terrain.receiveShadow = true;
   scene.add(terrain);
 
-  const horizonGeo = new THREE.PlaneGeometry(HORIZON, HORIZON, 72, 72);
+  const horizonGeo = new THREE.PlaneGeometry(HORIZON, HORIZON, 96, 96);
   horizonGeo.rotateX(-Math.PI / 2);
   const horizonMat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
-    roughness: 0.9,
+    roughness: 0.93,
     metalness: 0,
     bumpMap: bump,
-    bumpScale: 0.55,
-    envMapIntensity: 0.16,
+    bumpScale: 0.9,
+    envMapIntensity: 0.14,
     polygonOffset: true,
     polygonOffsetFactor: 1,
     polygonOffsetUnits: 1,
   });
+  const horizonDetail = attachGroundDetail(horizonMat, 84 * (HORIZON / SIZE));
   const horizon = new THREE.Mesh(horizonGeo, horizonMat);
   horizon.receiveShadow = true;
   scene.add(horizon);
@@ -725,6 +939,25 @@ export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
 
   const props = new THREE.Group();
   scene.add(props);
+  const colliders = [];
+
+  function addCollider(x, y, z, r, h, kind) {
+    colliders.push({ x, y, z, r, h, kind });
+  }
+
+  function hitObstacle(x, y, z, planeR = 2.8) {
+    for (let i = 0; i < colliders.length; i++) {
+      const c = colliders[i];
+      const dx = x - c.x;
+      const dz = z - c.z;
+      const lim = c.r + planeR;
+      if (dx * dx + dz * dz > lim * lim) continue;
+      if (y < c.y - 1) continue;
+      if (y > c.y + c.h) continue;
+      return c;
+    }
+    return null;
+  }
 
   const rainGeo = new THREE.BufferGeometry();
   const rainCount = 420;
@@ -764,6 +997,7 @@ export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
 
   function clearProps() {
     smokes.length = 0;
+    colliders.length = 0;
     while (props.children.length) {
       const child = props.children[0];
       props.remove(child);
@@ -796,6 +1030,7 @@ export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
         if (y < -44.5) continue;
         if (kind === 'mountains' && y > 18) continue;
         if ((kind === 'coast' || kind === 'lake') && y < -40) continue;
+        if (siteBlocked(x, z, kind)) continue;
         if (slopeAt(x, z, kind) > maxSlope) continue;
         if (hash2(ix + 11, iz + 19) > skip) continue;
         const s = style === 'palm'
@@ -831,6 +1066,7 @@ export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
           dummy.updateMatrix();
           extra.setMatrixAt(placed, dummy.matrix);
         }
+        addCollider(x, y, z, Math.max(2.6, s * 1.7), s * 6.5, 'tree');
         placed++;
       }
     }
@@ -879,7 +1115,7 @@ export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
       const x = (hash2(i + 200, 4) - 0.5) * 700;
       const z = (hash2(i + 19, 8) - 0.5) * 700;
       const y = heightAt(x, z, kind);
-      if (y < -43) continue;
+      if (y < -43 || siteBlocked(x, z, kind)) continue;
       const s = 1.6 + hash2(i, 9) * 1.8;
       const g = new THREE.Group();
       const trunk = new THREE.Mesh(baobabTrunkGeo, baobabTrunkMat);
@@ -892,6 +1128,7 @@ export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
       g.position.set(x, y, z);
       g.scale.setScalar(s);
       g.rotation.y = hash2(i, 3) * 6;
+      addCollider(x, y, z, s * 3.2, s * 6, 'tree');
       props.add(g);
     }
   }
@@ -901,19 +1138,25 @@ export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
       const x = (hash2(i + 90, 2) - 0.5) * 520;
       const z = (hash2(i + 17, 6) - 0.5) * 520;
       const y = heightAt(x, z, kind);
-      if (y < -44.5) continue;
+      if (y < -44.5 || siteBlocked(x, z, kind)) continue;
       const house = makeHouse(11, 6.4, 4.4, barnMat, roofMat, false);
       house.children[0].castShadow = dense;
       house.position.set(x, y, z);
       house.rotation.y = hash2(i, 12) * 6;
+      addCollider(x, y, z, 7.2, 8.5, 'building');
       props.add(house);
     }
   }
 
   function placeHamlets(kind, n, dense) {
     for (let i = 0; i < n; i++) {
-      const ox = (hash2(i + 50, 1) - 0.5) * 640;
-      const oz = (hash2(i + 7, 14) - 0.5) * 640;
+      let ox = (hash2(i + 50, 1) - 0.5) * 640;
+      let oz = (hash2(i + 7, 14) - 0.5) * 640;
+      for (let t = 0; t < 8 && siteBlocked(ox, oz, kind); t++) {
+        ox += (hash2(i, t + 40) - 0.5) * 70;
+        oz += (hash2(t, i + 41) - 0.5) * 70;
+      }
+      if (siteBlocked(ox, oz, kind)) continue;
       const houses = 6 + ((hash2(i, 3) * 7) | 0);
       const church = makeChurch();
       const cy = heightAt(ox, oz, kind);
@@ -923,13 +1166,14 @@ export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
         church.traverse((c) => {
           if (c.isMesh) c.castShadow = dense;
         });
+        addCollider(ox, cy, oz, 8.5, 16, 'building');
         props.add(church);
       }
       for (let h = 0; h < houses; h++) {
         const x = ox + (hash2(h, i + 2) - 0.5) * 38;
         const z = oz + (hash2(i, h + 4) - 0.5) * 32;
         const y = heightAt(x, z, kind);
-        if (y < -43) continue;
+        if (y < -43 || siteBlocked(x, z, kind)) continue;
         const roof = hash2(h, 9) > 0.55 ? tileRoofMat : slateMat;
         const house = makeHouse(5.6 + hash2(h, 2) * 4.2, 4.8 + hash2(h, 5) * 3, 3.1 + hash2(h, 8) * 2.4, plasterMat, roof, true);
         house.position.set(x, y, z);
@@ -937,6 +1181,7 @@ export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
         house.traverse((c) => {
           if (c.isMesh) c.castShadow = dense;
         });
+        addCollider(x, y, z, 5.2, 8, 'building');
         props.add(house);
       }
     }
@@ -951,7 +1196,7 @@ export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
       const x = (hash2(i + 3, 8) - 0.5) * 720;
       const z = (hash2(i + 11, 2) - 0.5) * 720;
       const y = heightAt(x, z, kind);
-      if (y < -43) continue;
+      if (y < -43 || siteBlocked(x, z, kind)) continue;
       dummy.position.set(x, y + 1.05, z);
       dummy.rotation.set(0, hash2(i, 9) > 0.5 ? 0 : Math.PI / 2, 0);
       dummy.scale.set(1, 0.75 + hash2(i, 4) * 0.55, 0.7 + hash2(i, 6) * 0.6);
@@ -1009,6 +1254,7 @@ export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
       g.add(opening);
       g.position.set(x - 32, y, z + hz);
       g.rotation.y = Math.PI / 2;
+      addCollider(x - 32, y, z + hz, 16, 12, 'building');
       props.add(g);
     }
   }
@@ -1046,6 +1292,7 @@ export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
         const x = ox + (col - 2.5) * 22 + (hash2(col, row) - 0.5) * 3;
         const z = oz + (row - 2) * 20 + (hash2(row, col) - 0.5) * 3;
         const y = heightAt(x, z, kind);
+        if (y < -43.5 || siteBlocked(x, z, kind)) continue;
         const w = 8 + hash2(col, row + 2) * 5;
         const d = 6 + hash2(row, col + 4) * 3;
         const h = 4 + hash2(col + 1, row) * 3;
@@ -1055,6 +1302,7 @@ export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
         house.traverse((c) => {
           if (c.isMesh) c.castShadow = dense;
         });
+        addCollider(x, y, z, Math.max(w, d) * 0.55, h + 4, 'building');
         props.add(house);
       }
     }
@@ -1063,6 +1311,7 @@ export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
     const spire = new THREE.Mesh(new THREE.ConeGeometry(1.6, 10, 6), tileRoofMat);
     spire.position.y = 16;
     church.add(spire);
+    addCollider(ox, heightAt(ox, oz, kind), oz, 10, 18, 'building');
     props.add(church);
   }
 
@@ -1070,10 +1319,11 @@ export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
     const spots = [[40, -30], [-50, 60], [90, 40], [-20, -90]];
     spots.forEach(([sx, sz], i) => {
       const y = heightAt(sx, sz, kind);
-      if (y < -44) return;
+      if (y < -44 || siteBlocked(sx, sz, kind)) return;
       const warehouse = makeHouse(14, 8, 4.2, plasterMat, tinMat, false);
       warehouse.position.set(sx, y, sz);
       warehouse.rotation.y = i * 0.4;
+      addCollider(sx, y, sz, 9, 9, 'building');
       props.add(warehouse);
       for (let h = 0; h < 3; h++) {
         const hut = new THREE.Group();
@@ -1083,6 +1333,7 @@ export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
         roof.position.y = 4.2;
         hut.add(body, roof);
         hut.position.set(sx + 12 + h * 9, y, sz + (h - 1) * 8);
+        addCollider(sx + 12 + h * 9, y, sz + (h - 1) * 8, 4.2, 7, 'building');
         props.add(hut);
       }
       if (dense) {
@@ -1098,7 +1349,7 @@ export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
       const x = (hash2(i + 70, 5) - 0.5) * 480;
       const z = (hash2(i + 11, 9) - 0.5) * 480;
       const y = heightAt(x, z, kind);
-      if (y < -43) continue;
+      if (y < -43 || siteBlocked(x, z, kind)) continue;
       for (let h = 0; h < 4; h++) {
         const ang = (h / 4) * Math.PI * 2;
         const hut = new THREE.Group();
@@ -1108,6 +1359,7 @@ export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
         roof.position.y = 3.6;
         hut.add(body, roof);
         hut.position.set(x + Math.cos(ang) * 7, y, z + Math.sin(ang) * 7);
+        addCollider(x + Math.cos(ang) * 7, y, z + Math.sin(ang) * 7, 3.6, 6, 'building');
         props.add(hut);
       }
     }
@@ -1143,6 +1395,7 @@ export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
         house.traverse((c) => {
           if (c.isMesh) c.castShadow = dense;
         });
+        addCollider(x, y, z, Math.max(w, d) * 0.55, hgt + 4, 'building');
         props.add(house);
         if (industrial && dense) {
           const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 1.1, 14 + hash2(col, 3) * 10, 8), sootMat);
@@ -1158,6 +1411,7 @@ export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
     const spire = new THREE.Mesh(new THREE.ConeGeometry(2.2, 16, 6), tileRoofMat);
     spire.position.y = 22;
     church.add(spire);
+    addCollider(ox, heightAt(ox, oz, kind), oz, 12, 24, 'building');
     props.add(church);
   }
 
@@ -1289,6 +1543,10 @@ export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
         r = 0.55;
         g = 0.78;
         b = 0.82;
+      } else if ((kind === 'fields' || kind === 'town' || kind === 'hills' || kind === 'savanna') && y < -46.2) {
+        r = 0.52;
+        g = 0.76;
+        b = 0.8;
       } else if (kind === 'sea' && y > -40) {
         r = 0.78;
         g = 0.82;
@@ -1332,7 +1590,8 @@ export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
     else if (kind === 'jungle') water.material.color.set(0x2d5a48);
     else if (kind === 'city') water.material.color.set(0x3a6874);
     else water.material.color.set(0x3a7a86);
-    terrainMat.bumpScale = kind === 'desert' ? 1.15 : kind === 'mountains' ? 0.95 : 0.7;
+    terrainMat.bumpScale = kind === 'desert' ? 3.4 : kind === 'fields' || kind === 'hills' || kind === 'coast' ? 1.85 : kind === 'mountains' ? 1.05 : 0.9;
+    horizonMat.bumpScale = terrainMat.bumpScale * 0.75;
   }
 
   function sculpt(kind) {
@@ -1349,24 +1608,50 @@ export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
       const x = hp.getX(i);
       const z = hp.getZ(i);
       const hole = Math.abs(x) < inner && Math.abs(z) < inner;
-      hp.setY(i, heightAt(x, z, kind) - (hole ? 3 : 0));
+      hp.setY(i, heightAt(x, z, kind) - (hole ? 1.2 : 0));
     }
     hp.needsUpdate = true;
     horizon.geometry.computeVertexNormals();
     paintVertexColors(kind);
     terrainMat.map?.dispose();
-    terrainMat.map = landTexture(kind);
-    if (renderer) terrainMat.map.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+    terrainMat.map = landTexture(kind, SIZE);
+    const aniso = renderer ? Math.min(16, renderer.capabilities.getMaxAnisotropy()) : 8;
+    terrainMat.map.anisotropy = aniso;
     terrainMat.color.set(0xffffff);
+    terrainMat.roughness = kind === 'desert' ? 0.96 : 0.92;
     terrainMat.needsUpdate = true;
+    const nextBump = bumpTexture(kind);
+    nextBump.anisotropy = aniso;
+    terrainMat.bumpMap?.dispose();
+    terrainMat.bumpMap = nextBump;
+    horizonMat.bumpMap = nextBump;
+    const nextDetail = groundDetailTexture(kind);
+    nextDetail.anisotropy = aniso;
+    terrainDetail.detailMap.value?.dispose();
+    terrainDetail.detailMap.value = nextDetail;
+    terrainDetail.detailRepeat.value = kind === 'desert' ? 64 : 52;
+    terrainDetail.detailAmt.value = kind === 'desert' ? 0.84 : 0.5;
+    horizonDetail.detailMap.value = nextDetail;
+    horizonDetail.detailRepeat.value = terrainDetail.detailRepeat.value * (HORIZON / SIZE);
+    horizonDetail.detailAmt.value = terrainDetail.detailAmt.value;
     horizonMat.map?.dispose();
-    const hmap = terrainMat.map.clone();
-    hmap.wrapS = hmap.wrapT = THREE.RepeatWrapping;
-    hmap.repeat.set(HORIZON / SIZE, HORIZON / SIZE);
+    const hRes = kind === 'fields' || kind === 'hills' || kind === 'coast' ? 1536 : 1024;
+    const hmap = landTexture(kind, HORIZON, hRes);
+    hmap.wrapS = hmap.wrapT = THREE.ClampToEdgeWrapping;
+    hmap.repeat.set(1, 1);
+    hmap.anisotropy = aniso;
     hmap.needsUpdate = true;
     horizonMat.map = hmap;
     horizonMat.needsUpdate = true;
-    water.visible = kind === 'sea' || kind === 'island' || kind === 'coast' || kind === 'lake' || kind === 'jungle' || (kind === 'city' && params.hasRiver);
+    water.visible =
+      kind === 'sea' ||
+      kind === 'island' ||
+      kind === 'coast' ||
+      kind === 'lake' ||
+      kind === 'jungle' ||
+      kind === 'fields' ||
+      kind === 'town' ||
+      (kind === 'city' && params.hasRiver);
     terrain.visible = true;
     horizon.visible = true;
     tintBiome(kind);
@@ -1532,6 +1817,7 @@ export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
     water,
     rain,
     heightAt: (x, z) => heightAt(x, z, terrainType),
+    hitObstacle,
     applyMission,
     applyWeather,
     setQuality,

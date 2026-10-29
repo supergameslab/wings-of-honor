@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createCraft, integrateFlight, forwardFromEuler, applyPose } from './flight.js';
-import { heightAt, makeParams } from './height.js';
+import { heightAt, makeParams, riverDistance, siteBlocked } from './height.js';
 import { updateAi, createAiCraft } from './ai.js';
 import { bombHitsTarget, bulletHits, segmentHitsSphere, creditKill, spawnBomb, predictBombImpact, predictLanding, stepBomb } from './combat.js';
 import { layoutFor, missionById, DIFFICULTY, huntFighterCount, bombingMission, MISSIONS, targetCount, fighterCount, winFor, makeQuickSortie, isCampaignMission, makePrologue, mergeProgress, starRating, usesFuel } from '../campaign.js';
@@ -46,6 +46,62 @@ describe('height', () => {
     const b = heightAt(12, -40, 'fields', p);
     expect(a).toBe(b);
     expect(a).not.toBe(heightAt(12, -40, 'mountains', p));
+  });
+
+  it('cuts rivers below the surrounding fields', () => {
+    const p = makeParams(4);
+    let bedX = 0;
+    let bedZ = 0;
+    let best = 99;
+    for (let x = -200; x <= 200; x += 20) {
+      for (let z = -200; z <= 200; z += 20) {
+        const d = riverDistance(x, z, p);
+        if (d < best) {
+          best = d;
+          bedX = x;
+          bedZ = z;
+        }
+      }
+    }
+    const bed = heightAt(bedX, bedZ, 'fields', p);
+    const bank = heightAt(bedX + 240, bedZ + 240, 'fields', p);
+    expect(bed).toBeLessThan(bank - 12);
+    expect(siteBlocked(bedX, bedZ, 'fields', p)).toBe(true);
+  });
+
+  it('keeps the river valley going far from the origin', () => {
+    const p = makeParams(4);
+    const probes = [
+      [1800, 0],
+      [0, 1800],
+      [-1800, 0],
+      [0, -1800],
+      [1400, 1400],
+    ];
+    let found = false;
+    for (const [cx, cz] of probes) {
+      let bedX = cx;
+      let bedZ = cz;
+      let best = 99;
+      for (let x = cx - 700; x <= cx + 700; x += 20) {
+        for (let z = cz - 700; z <= cz + 700; z += 20) {
+          const d = riverDistance(x, z, p);
+          if (d < best) {
+            best = d;
+            bedX = x;
+            bedZ = z;
+          }
+        }
+      }
+      if (best < 24) {
+        const bed = heightAt(bedX, bedZ, 'fields', p);
+        const bank = heightAt(bedX + 260, bedZ + 260, 'fields', p);
+        expect(bed).toBeLessThan(bank - 12);
+        found = true;
+        break;
+      }
+    }
+    expect(found).toBe(true);
   });
 });
 
@@ -403,6 +459,60 @@ describe('combat and ai', () => {
     const laid = layoutFor(mission, 'normal', { pilotCount: 1 });
     expect(laid.enemies.length).toBeGreaterThanOrEqual(8);
     expect(winFor(mission, 'normal').kills).toBe(laid.enemies.length);
+  });
+
+  it('scouts turn in and shoot when you are ahead', () => {
+    const e = createAiCraft({ x: 0, y: 40, z: 0, heading: 0, fireTimer: 0 }, DIFFICULTY.normal);
+    const player = { x: 0, y: 40, z: -55, heading: 0, pitch: 0, roll: 0 };
+    const r = updateAi(e, player, 0.05, flatHeight, () => 0.1);
+    expect(r.fire).toBe(true);
+    expect(e.state).toBe('attack');
+  });
+
+  it('breaks and banks after a pass instead of flying straight away', () => {
+    const e = createAiCraft({ x: 0, y: 40, z: -40, heading: 0, fireTimer: 9 }, DIFFICULTY.normal);
+    const player = { x: 0, y: 40, z: 0, heading: 0, pitch: 0, roll: 0 };
+    const startH = e.heading;
+    let broke = false;
+    for (let i = 0; i < 50; i++) {
+      updateAi(e, player, 0.05, flatHeight, () => 0.1);
+      if (e.state === 'break') broke = true;
+    }
+    expect(broke).toBe(true);
+    expect(Math.abs(angleDiff(startH, e.heading))).toBeGreaterThan(0.35);
+  });
+
+  it('does not flap the stick when already lined up', () => {
+    const e = createAiCraft({ x: 0, y: 40, z: 0, heading: 0, fireTimer: 9 }, DIFFICULTY.normal);
+    const player = { x: 0, y: 40, z: -90, heading: 0, pitch: 0, roll: 0 };
+    let flips = 0;
+    let prev = 0;
+    for (let i = 0; i < 40; i++) {
+      updateAi(e, player, 0.05, flatHeight, () => 0.1);
+      const s = Math.sign(e.steer);
+      if (i > 6 && s && prev && s !== prev) flips += 1;
+      prev = s || prev;
+    }
+    expect(flips).toBeLessThan(6);
+    expect(Math.abs(e.roll)).toBeLessThan(0.55);
+  });
+
+  it('shallow ground contact is a graze', () => {
+    const c = createCraft({ x: 0, y: -38.2, z: 0, pitch: -0.06 });
+    const r = integrateFlight(c, { pitch: 0 }, 0.05, () => -42);
+    expect(r.groundHit).toBe('graze');
+    expect(r.groundDamage).toBe(0);
+  });
+
+  it('a steep dive into the ground is a crash', () => {
+    const c = createCraft({ x: 0, y: 8, z: 0, pitch: -0.55 });
+    let r;
+    for (let i = 0; i < 80; i++) {
+      r = integrateFlight(c, { pitch: -1 }, 0.05, () => -42);
+      if (r.groundHit === 'crash') break;
+    }
+    expect(r.groundHit).toBe('crash');
+    expect(r.groundDamage).toBeGreaterThan(50);
   });
 
   it('fleeing scouts stop shooting', () => {

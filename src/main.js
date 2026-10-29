@@ -558,6 +558,7 @@ let score = 0;
 let kills = 0;
 let depots = 0;
 let hull = 100;
+let lastPropHit = 0;
 let playerMaxHull = 100;
 let playerPlane = planeById('spitfire');
 let mode = 'menu';
@@ -1177,6 +1178,7 @@ function resetGame() {
   depots = 0;
   playerMaxHull = spec.hull * (playerPlane.hullMul || 1);
   hull = playerMaxHull;
+  lastPropHit = 0;
   elapsed = 0;
   ordersDoneAt = 0;
   victoryAt = 0;
@@ -2471,7 +2473,20 @@ function update(dt) {
         airspeed = speed;
         const stripNow = fuelJob ? overStrip() : null;
         const caught = fuelJob && !flight.grounded && shouldAutoLand(stripNow, landMeter) && tryLand({ auto: true });
-        if (flown.groundDamage && !caught) damagePlayer(flown.groundDamage);
+        if (flown.groundHit === 'crash' && !caught) {
+          notify('WENT INTO THE GROUND');
+          damagePlayer(flown.groundDamage);
+        } else if (flown.groundDamage && !caught) damagePlayer(flown.groundDamage);
+        if (!flight.grounded && !caught) {
+          const smash = world.hitObstacle?.(player.position.x, player.position.y, player.position.z);
+          if (smash && elapsed - lastPropHit > 0.4) {
+            lastPropHit = elapsed;
+            const tree = smash.kind === 'tree';
+            notify(tree ? 'CLIPPED A TREE' : 'HIT A BUILDING');
+            damagePlayer(tree ? 24 : 42);
+            flight.pitch = Math.max(flight.pitch, 0.16);
+          }
+        }
         updateCockpit(speed);
         if (fuelJob && !flight.grounded) {
           fuel = Math.max(0, fuel - FUEL.BURN_PER_S * dt);

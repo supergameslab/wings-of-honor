@@ -462,11 +462,13 @@ export function layoutFor(mission, difficulty, opts = {}) {
       angle = Math.PI + (i - (fighters - 1) / 2) * 0.7 + (rng() - 0.5) * 0.25;
       dist = 85 + rng() * 90;
     }
+    const x = Math.sin(angle) * dist;
+    const z = -Math.cos(angle) * dist;
     enemies.push({
-      x: Math.sin(angle) * dist,
+      x,
       agl: 16 + rng() * 18 + wave * 6,
-      z: -Math.cos(angle) * dist,
-      heading: angle + Math.PI * (rng() > 0.5 ? 0.35 : -0.35),
+      z,
+      heading: Math.atan2(x, z) + (rng() - 0.5) * 0.48,
       wave: 0,
     });
   }

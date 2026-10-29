@@ -1,4 +1,4 @@
-import { clamp, angleDiff } from './math.js';
+import { clamp, angleDiff, damp } from './math.js';
 import { FLIGHT } from './constants.js';
 import { COMBAT } from './constants.js';
 import { forwardFromEuler, rightFromHeading, integrateFlight } from './flight.js';
@@ -27,6 +27,8 @@ export function createAiCraft(spawn, spec) {
     breakTimer: 0,
     breakSign: 1,
     breakPitch: 0.4,
+    steer: 0,
+    turnCommit: 0,
     lastHitBy: null,
     wasHit: false,
     ace: ace?.id || null,
@@ -38,21 +40,44 @@ export function createAiCraft(spawn, spec) {
   };
 }
 
+function committedYaw(e, targetYaw) {
+  let yawDiff = angleDiff(e.heading, targetYaw);
+  if (e.turnCommit && Math.abs(yawDiff) > 1.55 && Math.sign(yawDiff) !== Math.sign(e.turnCommit)) {
+    yawDiff = Math.abs(yawDiff) * e.turnCommit;
+  }
+  if (Math.abs(yawDiff) > 0.55) {
+    e.turnCommit = Math.sign(yawDiff) || e.turnCommit || 1;
+  } else if (Math.abs(yawDiff) < 0.18) {
+    e.turnCommit = 0;
+  }
+  return yawDiff;
+}
+
+function flyTo(e, aim, dt, turnCap, sampleHeight, player) {
+  const toAim = { x: aim.x - e.x, y: aim.y - e.y, z: aim.z - e.z };
+  const targetYaw = Math.atan2(-toAim.x, -toAim.z);
+  const yawDiff = committedYaw(e, targetYaw);
+  const desiredTurn = clamp(yawDiff / 0.95, -1, 1) * turnCap;
+  e.steer = damp(e.steer || 0, desiredTurn, 8.4, dt);
+  let pitchStick = clamp(toAim.y * 0.04, -1, 1);
+  if (e.y > player.y + FLIGHT.ENEMY_MAX_ABOVE) pitchStick = Math.min(pitchStick, -0.42);
+  const flown = integrateFlight(e, { pitch: pitchStick, turn: e.steer }, dt, sampleHeight, 0, e.phase, FLIGHT.ENEMY_CLEARANCE);
+  const minY = sampleHeight(e.x, e.z) + FLIGHT.ENEMY_CLEARANCE;
+  const enemyCeil = Math.min(minY + FLIGHT.MAX_AGL - 36, player.y + FLIGHT.ENEMY_MAX_ABOVE);
+  e.y = Math.min(e.y, enemyCeil);
+  return flown.forward || forwardFromEuler(e.heading, e.pitch);
+}
+
 export function updateAi(e, player, dt, sampleHeight, rng = Math.random) {
   e.phase += dt;
   e.breakTimer = Math.max(0, e.breakTimer - dt);
   const ace = Boolean(e.ace);
+  const turnCap = Math.min(ace ? 1 : 0.9, (ace ? 0.92 : 0.72) * (e.turn || 0.86) / 0.86);
   if (e.fleeing) {
     const awayX = e.x - player.x;
     const awayZ = e.z - player.z;
     const aim = { x: e.x + awayX * 2, y: e.y + 22, z: e.z + awayZ * 2 };
-    const toAim = { x: aim.x - e.x, y: aim.y - e.y, z: aim.z - e.z };
-    const targetYaw = Math.atan2(-toAim.x, -toAim.z);
-    const yawDiff = angleDiff(e.heading, targetYaw);
-    const turn = clamp(yawDiff / 0.95, -1, 1) * 0.85;
-    const pitchStick = clamp(toAim.y * 0.04, -0.2, 1);
-    const flown = integrateFlight(e, { pitch: pitchStick, turn }, dt, sampleHeight, 0, e.phase, FLIGHT.ENEMY_CLEARANCE);
-    const fly = flown.forward || forwardFromEuler(e.heading, e.pitch);
+    const fly = flyTo(e, aim, dt, 0.85, sampleHeight, player);
     const pDist = Math.hypot(player.x - e.x, player.y - e.y, player.z - e.z);
     return { fire: false, forward: fly, dist: pDist, ram: false };
   }
@@ -62,6 +87,7 @@ export function updateAi(e, player, dt, sampleHeight, rng = Math.random) {
     e.breakTimer = (ace ? 3.1 : 1.7) + rng() * 0.9;
     e.breakSign = Math.sign(rng() - 0.5) || 1;
     e.breakPitch = rng() > 0.38 ? -0.62 : 0.42;
+    e.turnCommit = e.breakSign;
   }
   const fwd = forwardFromEuler(e.heading, e.pitch);
   const toPlayer = { x: player.x - e.x, y: player.y - e.y, z: player.z - e.z };
@@ -84,6 +110,7 @@ export function updateAi(e, player, dt, sampleHeight, rng = Math.random) {
     e.breakTimer = (ace ? 2.8 : 2.2) + rng() * 1.1;
     e.breakSign = Math.sign(rng() - 0.5) || 1;
     e.breakPitch = rng() > 0.32 ? (ace ? -0.58 : -0.35) : 0.18;
+    e.turnCommit = e.breakSign;
   }
 
   let aim = { x: player.x, y: player.y, z: player.z };
@@ -109,27 +136,7 @@ export function updateAi(e, player, dt, sampleHeight, rng = Math.random) {
     };
   }
 
-  const toAim = { x: aim.x - e.x, y: aim.y - e.y, z: aim.z - e.z };
-  const targetYaw = Math.atan2(-toAim.x, -toAim.z);
-  let yawDiff = angleDiff(e.heading, targetYaw);
-  if (Math.abs(yawDiff) > 1.85 && e.breakTimer <= 0) {
-    e.state = 'break';
-    e.breakTimer = 2.6 + rng() * 0.8;
-    e.breakSign = Math.sign(yawDiff) || 1;
-    yawDiff = e.breakSign * 0.9;
-  }
-
-  const turnCap = Math.min(ace ? 1 : 0.9, (ace ? 0.92 : 0.72) * (e.turn || 0.86) / 0.86);
-  const turn = clamp(yawDiff / 0.95, -1, 1) * turnCap;
-  let pitchStick = clamp(toAim.y * 0.04, -1, 1);
-  if (e.y > player.y + FLIGHT.ENEMY_MAX_ABOVE) pitchStick = Math.min(pitchStick, -0.42);
-
-  const flown = integrateFlight(e, { pitch: pitchStick, turn }, dt, sampleHeight, 0, e.phase, FLIGHT.ENEMY_CLEARANCE);
-  const minY = sampleHeight(e.x, e.z) + FLIGHT.ENEMY_CLEARANCE;
-  const enemyCeil = Math.min(minY + FLIGHT.MAX_AGL - 36, player.y + FLIGHT.ENEMY_MAX_ABOVE);
-  e.y = Math.min(e.y, enemyCeil);
-
-  const fly = flown.forward || forwardFromEuler(e.heading, e.pitch);
+  const fly = flyTo(e, aim, dt, turnCap, sampleHeight, player);
   e.fireTimer -= dt;
   let fire = false;
   const toP = { x: player.x - e.x, y: player.y - e.y, z: player.z - e.z };

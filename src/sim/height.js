@@ -24,9 +24,9 @@ export function makeParams(seed) {
     phase: (s % 17) * 0.37,
     amp: 0.75 + (s % 6) * 0.1,
     coastOff: ((s % 9) - 4) * 24,
-    riverAmp: 26 + (s % 8) * 9,
-    riverFreq: 0.0065 + (s % 6) * 0.0016,
-    riverOff: ((s % 11) - 5) * 14,
+    riverAmp: 52 + (s % 8) * 16,
+    riverFreq: 0.0035 + (s % 6) * 0.00085,
+    riverOff: ((s % 11) - 5) * 18,
     cityX: k(1, 7) * 16,
     cityZ: k(2, 6) * 15,
     cityRot: (s % 8) * 0.22,
@@ -64,6 +64,57 @@ function worldXZ(x, z, p) {
   };
 }
 
+export function riverCenterZ(rx, p = params) {
+  return (
+    p.riverOff +
+    Math.sin(rx * p.riverFreq + p.phase) * p.riverAmp +
+    Math.sin(rx * p.riverFreq * 2.28 + p.phase * 1.7) * p.riverAmp * 0.34 +
+    Math.sin(rx * p.riverFreq * 0.41 + p.phase * 0.55) * (p.riverAmp * 0.58 + 48)
+  );
+}
+
+export function riverDistance(x, z, p = params) {
+  const w = worldXZ(x, z, p);
+  return Math.abs(w.z - riverCenterZ(w.x, p));
+}
+
+export function canalDistance(x, z, p = params) {
+  const w = worldXZ(x, z, p);
+  return Math.abs(w.z + p.riverOff - Math.sin(w.x * 0.018) * 10);
+}
+
+export function roadDistance(x, z, p = params) {
+  const w = worldXZ(x, z, p);
+  const a = Math.abs(w.z - Math.sin(w.x * 0.0075 + p.phase) * 90);
+  const b = Math.abs(w.x - Math.cos(w.z * 0.006 + p.phase) * 70);
+  return Math.min(a, b);
+}
+
+export function siteBlocked(x, z, terrain = 'fields', p = params) {
+  if (terrain === 'sea' || terrain === 'island' || terrain === 'desert' || terrain === 'mountains' || terrain === 'lake') return false;
+  if (roadDistance(x, z, p) < 16) return true;
+  if (riverDistance(x, z, p) < 52) return true;
+  if (terrain === 'fields' || terrain === 'hills' || terrain === 'town' || terrain === 'coast' || terrain === 'savanna') {
+    if (canalDistance(x, z, p) < 18) return true;
+  }
+  return false;
+}
+
+function waterCut(x, z, terrain, p) {
+  if (terrain === 'sea' || terrain === 'island' || terrain === 'desert' || terrain === 'mountains' || terrain === 'lake' || terrain === 'city') return 0;
+  const rd = riverDistance(x, z, p);
+  const bed = 1 - smoothstep(8, 28, rd);
+  const bank = 1 - smoothstep(28, 170, rd);
+  let cut = (terrain === 'jungle' ? 24 : 22) * bank * bank + 8 * bed;
+  if (terrain === 'fields' || terrain === 'hills' || terrain === 'town' || terrain === 'coast' || terrain === 'savanna') {
+    const cd = canalDistance(x, z, p);
+    const canalBed = 1 - smoothstep(3, 11, cd);
+    const canalBank = 1 - smoothstep(11, 54, cd);
+    cut = Math.max(cut, 10 * canalBank * canalBank + 3.5 * canalBed);
+  }
+  return cut;
+}
+
 export function heightAt(x, z, terrain = 'fields', p = params) {
   const w = worldXZ(x, z, p);
   const xr = w.x;
@@ -76,17 +127,18 @@ export function heightAt(x, z, terrain = 'fields', p = params) {
     return h;
   }
   if (terrain === 'fields' || terrain === 'town') {
-    return -42 + n(xr, zr, p.fx, p.fz, 2.4 * p.amp) + n(xr, zr, p.fx * 2.4, p.fz * 2.6, 0.9);
+    const land = -42 + n(xr, zr, p.fx, p.fz, 2.4 * p.amp) + n(xr, zr, p.fx * 2.4, p.fz * 2.6, 0.9);
+    return Math.max(land, -44.2) - waterCut(x, z, terrain, p);
   }
   if (terrain === 'city') {
     const land = -42 + n(xr, zr, p.fx, p.fz, 1.6) + n(xr, zr, 0.02, 0.018, 0.5);
     if (!p.hasRiver) return land;
     const river = Math.abs(z - p.cityZ * 0.15 - p.riverOff * 0.35 - Math.sin((x - p.cityX) * p.riverFreq + p.phase) * p.riverAmp);
-    const wet = 1 - smoothstep(7, 22, river);
-    return land * (1 - wet) + -45.4 * wet;
+    const wet = 1 - smoothstep(10, 42, river);
+    return land * (1 - wet) + -49.4 * wet;
   }
   if (terrain === 'hills') {
-    return -34 + n(xr, zr, p.fx * 1.4, p.fz, 16 * p.amp) + n(xr, zr, p.fx * 2.6, p.fz * 2.2, 9) + n(xr, zr, p.fx * 0.7, p.fz * 1.8, 7);
+    return -34 + n(xr, zr, p.fx * 1.4, p.fz, 16 * p.amp) + n(xr, zr, p.fx * 2.6, p.fz * 2.2, 9) + n(xr, zr, p.fx * 0.7, p.fz * 1.8, 7) - waterCut(x, z, terrain, p);
   }
   if (terrain === 'mountains') {
     const ridge = Math.abs(Math.sin(xr * (0.0055 + (p.seed % 4) * 0.0006) + zr * 0.0032 + p.phase));
@@ -95,7 +147,7 @@ export function heightAt(x, z, terrain = 'fields', p = params) {
   if (terrain === 'coast') {
     const water = smoothstep(-40 + p.coastOff, 150 + p.coastOff, xr);
     const land = -36 + n(xr, zr, p.fx * 1.5, p.fz, 11) + n(xr, zr, p.fx * 3, p.fz * 2.4, 4);
-    return land * (1 - water) + -46 * water;
+    return land * (1 - water) + -46 * water - waterCut(x, z, terrain, p) * (1 - water);
   }
   if (terrain === 'desert') {
     const dunes = Math.abs(Math.sin(xr * (0.007 + (p.seed % 5) * 0.0008) + zr * 0.003 + p.phase)) * 11 + n(xr, zr, 0.014, 0.02, 5);
@@ -111,13 +163,11 @@ export function heightAt(x, z, terrain = 'fields', p = params) {
     p.kopjes.slice(0, 2).forEach((k) => {
       rock += kopje(x, z, k.x, k.z, k.r * 0.9, k.h * 0.7);
     });
-    return -39 + rise + rock;
+    return -39 + rise + rock - waterCut(x, z, terrain, p);
   }
   if (terrain === 'jungle') {
-    const river = Math.abs(zr - p.riverOff - Math.sin(xr * p.riverFreq + p.phase) * p.riverAmp);
-    const wet = 1 - smoothstep(10, 32, river);
     const land = -35 + n(xr, zr, p.fx * 1.6, p.fz, 8) + n(xr, zr, 0.03, 0.022, 3);
-    return land * (1 - wet) + -45.6 * wet;
+    return land - waterCut(x, z, terrain, p);
   }
   if (terrain === 'lake') {
     const water = smoothstep(-30 + p.coastOff, 190 + p.coastOff, zr);

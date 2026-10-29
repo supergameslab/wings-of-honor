@@ -60,7 +60,7 @@ export function integrateFlight(craft, input, dt, sampleHeight, wind = 0, elapse
         craft.grounded = false;
         craft.pitch = 0.16;
       }
-      return { speed: craft.speed, groundDamage: 0, forward };
+      return { speed: craft.speed, groundDamage: 0, groundHit: null, forward };
     }
   }
   if (Math.abs(pitchIn) < 0.06) {
@@ -94,15 +94,22 @@ export function integrateFlight(craft, input, dt, sampleHeight, wind = 0, elapse
   const minAlt = groundY + clearance;
   const maxAlt = groundY + (h.maxAgl || FLIGHT.MAX_AGL);
   let groundDamage = 0;
+  let groundHit = null;
   if (craft.y < minAlt) {
     craft.y = minAlt;
-    if (craft.pitch < 0) craft.pitch *= 0.3;
-    groundDamage = FLIGHT.GROUND_CLEARANCE && 11 * dt;
+    const descent = Math.max(0, -forward.y * speed);
+    if (craft.pitch < -FLIGHT.CRASH_PITCH || descent > FLIGHT.CRASH_DESCENT) {
+      groundHit = 'crash';
+      groundDamage = 999;
+    } else {
+      groundHit = 'graze';
+      if (craft.pitch < 0) craft.pitch *= 0.45;
+    }
   } else if (craft.y > maxAlt - 28 && craft.pitch > 0) {
     craft.pitch = damp(craft.pitch, 0, 5.5, dt);
   }
   craft.y = clamp(craft.y, minAlt, maxAlt);
-  return { speed, groundDamage, forward };
+  return { speed, groundDamage, groundHit, forward };
 }
 
 export function applyPose(object3d, craft) {
