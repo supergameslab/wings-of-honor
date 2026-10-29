@@ -292,7 +292,7 @@ function landTexture(terrain, worldSpan = SIZE, resolution) {
         col = mix3(col, trench, 1 - smoothstep(2.2, 8.5, ditch));
         if (ditch < 5) col = mix3(col, [48, 92, 96], saturate(1 - ditch / 5) * 0.85);
         const river = riverDistance(wx, wz);
-        if (river < 52) col = mix3(col, [86, 78, 54], saturate(1 - (river - 16) / 36) * 0.72);
+        if (river < 36) col = mix3(col, [86, 78, 54], saturate(1 - (river - 16) / 20) * 0.62);
         if (river < 18) col = mix3(col, [42, 102, 98], saturate(1 - river / 18) * 0.95);
         if (river < 9) col = mix3([28, 78, 92], [64, 122, 118], grain);
         const ham = Math.hypot(((rx + 400) % 150) - 75, ((rz + 280) % 128) - 64);
@@ -300,7 +300,7 @@ function landTexture(terrain, worldSpan = SIZE, resolution) {
       }
       if (terrain === 'hills' || terrain === 'savanna' || terrain === 'jungle' || terrain === 'coast' || terrain === 'town') {
         const river = riverDistance(wx, wz);
-        if (river < 52) col = mix3(col, [86, 78, 54], saturate(1 - (river - 16) / 36) * 0.7);
+        if (river < 36) col = mix3(col, [86, 78, 54], saturate(1 - (river - 16) / 20) * 0.6);
         if (river < 18) col = mix3(col, [42, 102, 98], saturate(1 - river / 18) * 0.95);
         if (river < 9) col = mix3([28, 78, 92], [64, 122, 118], grain);
       }
@@ -452,9 +452,9 @@ function stampWaterways(ctx, W, terrain, worldSpan = SIZE) {
         terrain === 'city'
           ? Math.abs(wz - params.cityZ * 0.15 - params.riverOff * 0.35 - Math.sin((wx - params.cityX) * params.riverFreq + params.phase) * params.riverAmp)
           : riverDistance(wx, wz);
-      if (river < 155) col = mix3(col, [92, 82, 54], saturate(1 - (river - 52) / 103) * 0.52);
-      if (river < 52) col = mix3(col, [42, 102, 98], saturate(1 - (river - 24) / 28) * 0.92);
-      if (river < 24) col = mix3([26, 74, 90], [58, 118, 116], grain);
+      if (river < 36) col = mix3(col, [86, 78, 54], saturate(1 - (river - 16) / 20) * 0.62);
+      if (river < 18) col = mix3(col, [42, 102, 98], saturate(1 - river / 18) * 0.95);
+      if (river < 9) col = mix3([28, 78, 92], [64, 122, 118], grain);
       d[i] = col[0];
       d[i + 1] = col[1];
       d[i + 2] = col[2];
@@ -1643,15 +1643,7 @@ export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
     hmap.needsUpdate = true;
     horizonMat.map = hmap;
     horizonMat.needsUpdate = true;
-    water.visible =
-      kind === 'sea' ||
-      kind === 'island' ||
-      kind === 'coast' ||
-      kind === 'lake' ||
-      kind === 'jungle' ||
-      kind === 'fields' ||
-      kind === 'town' ||
-      (kind === 'city' && params.hasRiver);
+    water.visible = kind === 'sea' || kind === 'island' || kind === 'coast' || kind === 'lake';
     terrain.visible = true;
     horizon.visible = true;
     tintBiome(kind);
