@@ -623,6 +623,7 @@ function worldToRadar(dx, dz, heading) {
 function applyFlightPose() {
   player.rotation.order = 'YXZ';
   player.rotation.set(flight.pitch, flight.heading, -flight.roll);
+  player.userData.setGear?.(flight.grounded);
 }
 
 function updateCockpit(speed = 62) {
@@ -684,10 +685,10 @@ function setView(next = viewMode === 'cockpit' ? 'chase' : 'cockpit') {
 }
 
 function chaseCamTarget(target) {
-  const back = 16.5;
+  const back = 19.5;
   target.set(
     player.position.x + Math.sin(flight.heading) * back,
-    player.position.y + 4.6,
+    player.position.y + 5.2,
     player.position.z + Math.cos(flight.heading) * back,
   );
 }
@@ -2047,27 +2048,30 @@ const hangarStudio = {
 function ensureHangarStudio() {
   if (hangarStudio.scene) return;
   const sc = new THREE.Scene();
-  sc.background = new THREE.Color(0x101920);
-  const cam = new THREE.PerspectiveCamera(32, 2, 0.1, 40);
-  cam.position.set(7.2, 2.15, 6.4);
-  cam.lookAt(0, 0.15, 0);
-  sc.add(new THREE.HemisphereLight(0xe8f0f6, 0x5a5548, 1.8));
-  const key = new THREE.DirectionalLight(0xfff6e4, 3.2);
-  key.position.set(5, 8, 6);
+  sc.background = new THREE.Color(0x243040);
+  const cam = new THREE.PerspectiveCamera(36, 2, 0.1, 80);
+  cam.position.set(4.6, 4.8, -5.4);
+  cam.lookAt(0, 0.05, 0.25);
+  sc.add(new THREE.HemisphereLight(0xf2f6fa, 0x6a6458, 2.4));
+  const key = new THREE.DirectionalLight(0xfff4e6, 5.2);
+  key.position.set(8, 10, -7);
   sc.add(key);
-  const fillL = new THREE.DirectionalLight(0xb0c8dc, 0.9);
-  fillL.position.set(-6, 3, -4);
+  const fillL = new THREE.DirectionalLight(0xc5d8ec, 1.8);
+  fillL.position.set(-7, 5, 4);
   sc.add(fillL);
+  const rim = new THREE.DirectionalLight(0xe8f2ff, 1.2);
+  rim.position.set(-3, 5, -8);
+  sc.add(rim);
   const floor = new THREE.Mesh(
-    new THREE.CircleGeometry(8, 28),
+    new THREE.CircleGeometry(12, 28),
     new THREE.MeshBasicMaterial({ color: 0x162028 }),
   );
   floor.rotation.x = -Math.PI / 2;
-  floor.position.y = -1.02;
+  floor.position.y = -1.18;
   sc.add(floor);
   hangarStudio.scene = sc;
   hangarStudio.cam = cam;
-  hangarStudio.rt = new THREE.WebGLRenderTarget(440, 220);
+  hangarStudio.rt = new THREE.WebGLRenderTarget(880, 440);
 }
 
 function paintHangarThumb(cv, craft) {
@@ -2076,8 +2080,10 @@ function paintHangarThumb(cv, craft) {
     hangarStudio.scene.remove(hangarStudio.model);
     hangarStudio.model = null;
   }
-  const model = makeAircraft({ type: craft.id });
-  model.rotation.set(0.12, 0.72, 0.04);
+  const model = makeAircraft({ type: craft.id, gear: true });
+  model.rotation.set(0.1, 0.46, 0.22);
+  hangarStudio.scene.environment = scene.environment;
+  hangarStudio.scene.environmentIntensity = 0.85;
   hangarStudio.scene.add(model);
   hangarStudio.model = model;
   const prev = renderer.getRenderTarget();
@@ -2135,10 +2141,16 @@ function renderHangar() {
   });
 }
 
-$('hangar-btn')?.addEventListener('click', () => {
-  renderHangar();
+function openHangar() {
+  try {
+    renderHangar();
+  } catch (err) {
+    console.error(err);
+    window.__hangarError = String(err?.stack || err);
+  }
   setMode('hangar');
-});
+}
+$('hangar-btn')?.addEventListener('click', openHangar);
 $('hangar-back')?.addEventListener('click', () => setMode('menu'));
 $('view-btn')?.addEventListener('click', () => {
   if (mode === 'playing' || mode === 'mp' || mode === 'paused') setView();
@@ -3195,3 +3207,11 @@ if (quality !== 'HIGH') {
 
 applyMenuChrome();
 checkApi();
+if (import.meta.env.DEV) {
+  window.__openHangar = openHangar;
+  window.__hangarStudio = hangarStudio;
+  window.__quick = () => {
+    beginBriefing(makeQuickSortie(progress));
+    launchSortie();
+  };
+}
