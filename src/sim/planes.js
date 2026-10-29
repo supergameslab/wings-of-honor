@@ -267,8 +267,8 @@ export function planeById(id) {
   return PLANES.find((p) => p.id === id) || PLANES[0];
 }
 
-export const COCKPIT_SIGHT = { x: 0, y: 0.28, z: -1.28 };
-export const COCKPIT_CAM = { x: 0, y: 0.28, z: 0.5 };
+export const COCKPIT_SIGHT = { x: 0, y: 0.42, z: -1.28 };
+export const COCKPIT_CAM = { x: 0, y: 0.42, z: 0.62 };
 
 export function planeSide(plane) {
   if (!plane) return 'allied';

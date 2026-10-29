@@ -673,9 +673,9 @@ function setView(next = viewMode === 'cockpit' ? 'chase' : 'cockpit') {
   if (btn) btn.textContent = pit ? 'COCKPIT' : 'CHASE';
   if (pit && player) {
     player.add(camera);
-    const cam = player.userData.cockpitCam || { x: 0, y: 0.28, z: 0.5, look: -0.1 };
+    const cam = player.userData.cockpitCam || { x: 0, y: 0.42, z: 0.62, look: 0 };
     camera.position.set(cam.x, cam.y, cam.z);
-    camera.rotation.set(cam.look ?? -0.1, 0, 0);
+    camera.rotation.set(cam.look ?? 0, 0, 0);
     camera.fov = 62;
     camera.near = 0.05;
     if (!player.userData.pitLamp && player.userData.cockpit) {
@@ -1363,7 +1363,30 @@ function soloRibbons(win) {
   return out;
 }
 
-function finish(win) {
+function failReason(cause) {
+  if (cause === 'ground') {
+    return {
+      eyebrow: 'CRASH',
+      title: 'CRASHED INTO THE GROUND',
+      copy: 'The aeroplane hit the dirt. Pull up sooner next time.',
+    };
+  }
+  if (cause === 'tree') {
+    return { eyebrow: 'CRASH', title: 'HIT A TREE', copy: 'A tree took the wing. Stay higher over the woods.' };
+  }
+  if (cause === 'building') {
+    return { eyebrow: 'CRASH', title: 'HIT A BUILDING', copy: 'The town is brick. Fly around it.' };
+  }
+  if (cause === 'shot') {
+    return { eyebrow: 'DOWN', title: 'SHOT DOWN', copy: 'Enemy fire tore the kite up. Try again.' };
+  }
+  if (cause === 'ram') {
+    return { eyebrow: 'DOWN', title: 'MID-AIR COLLISION', copy: 'You flew through another aeroplane.' };
+  }
+  return { eyebrow: 'OH NO', title: 'OH NO — TRY AGAIN', copy: 'That was a bump. Hop in and try again.' };
+}
+
+function finish(win, cause) {
   const kind = currentKind();
   const spec = DIFFICULTY[currentMission.onboard ? 'easy' : progress.difficulty] || DIFFICULTY.normal;
   const hullPct = hull / (playerMaxHull || spec.hull || 100);
@@ -1373,7 +1396,9 @@ function finish(win) {
   setMode('result');
   const best = Math.max(Number(localStorage.getItem('wings-honor-best-score') || 0), score);
   localStorage.setItem('wings-honor-best-score', String(best));
-  $('result-title').textContent = win ? (currentMission.onboard ? "YOU'RE A PILOT" : 'NICE FLYING') : 'OH NO — TRY AGAIN';
+  const fail = failReason(cause);
+  if ($('result-eyebrow')) $('result-eyebrow').textContent = win ? (currentMission.onboard ? 'FIRST FLIGHT' : 'NICE FLYING') : fail.eyebrow;
+  $('result-title').textContent = win ? (currentMission.onboard ? "YOU'RE A PILOT" : 'NICE FLYING') : fail.title;
   $('result-stars').textContent = win && isCampaignMission(currentMission) ? `${'★'.repeat(stars)}${'☆'.repeat(3 - stars)}` : '';
   $('report-btn')?.classList.add('hidden');
   $('result-unlock').textContent = '';
@@ -1414,7 +1439,7 @@ function finish(win) {
       $('next-btn').innerHTML = currentMission.huntPractice ? 'PRACTICE AGAIN <span>↗</span>' : 'NEW SCENARIO <span>↗</span>';
     }
   } else {
-    $('result-copy').textContent = 'That was a bump. Hop in and try again.';
+    $('result-copy').textContent = fail.copy;
     $('next-btn').classList.toggle('hidden', !currentMission?.skirmish);
     if (currentMission?.skirmish) $('next-btn').innerHTML = 'NEW SCENARIO <span>↗</span>';
   }
@@ -1656,14 +1681,14 @@ function shoot() {
   muzzleFlash();
 }
 
-function damagePlayer(amount) {
+function damagePlayer(amount, cause) {
   const spec = DIFFICULTY[progress.difficulty];
   hull = Math.max(0, hull - amount * spec.damageMul);
   ui.hull.style.width = `${(hull / (playerMaxHull || spec.hull)) * 100}%`;
   if (hull < (playerMaxHull || spec.hull) * 0.35) ui.hull.style.background = '#b94738';
   if (hull <= 0) {
     spawnExplosion(player.position, true);
-    finish(Boolean(victoryAt));
+    finish(Boolean(victoryAt), cause);
   }
 }
 
@@ -2464,7 +2489,7 @@ function updateEnemy(e, dt) {
     }
   }
   if (result.ram) {
-    damagePlayer(COMBAT.RAM_DAMAGE);
+    damagePlayer(COMBAT.RAM_DAMAGE, 'ram');
     spawnExplosion(p);
     p.addScaledVector(_right.set(Math.sign(p.x) || 1, 0.6, 0.4), 18);
   }
@@ -2592,16 +2617,16 @@ function update(dt) {
         const stripNow = fuelJob ? overStrip() : null;
         const caught = fuelJob && !flight.grounded && shouldAutoLand(stripNow, landMeter) && tryLand({ auto: true });
         if (flown.groundHit === 'crash' && !caught) {
-          notify('WENT INTO THE GROUND');
-          damagePlayer(flown.groundDamage);
-        } else if (flown.groundDamage && !caught) damagePlayer(flown.groundDamage);
+          notify('CRASHED INTO THE GROUND');
+          damagePlayer(flown.groundDamage, 'ground');
+        } else if (flown.groundDamage && !caught) damagePlayer(flown.groundDamage, 'ground');
         if (!flight.grounded && !caught) {
           const smash = world.hitObstacle?.(player.position.x, player.position.y, player.position.z);
           if (smash && elapsed - lastPropHit > 0.4) {
             lastPropHit = elapsed;
             const tree = smash.kind === 'tree';
             notify(tree ? 'CLIPPED A TREE' : 'HIT A BUILDING');
-            damagePlayer(tree ? 24 : 42);
+            damagePlayer(tree ? 24 : 42, tree ? 'tree' : 'building');
             flight.pitch = Math.max(flight.pitch, 0.16);
           }
         }
@@ -2666,7 +2691,7 @@ function update(dt) {
         }
       } else if (segmentHitsSphere(_bprev.x, _bprev.y, _bprev.z, b.mesh.position.x, b.mesh.position.y, b.mesh.position.z, player.position.x, player.position.y, player.position.z, COMBAT.HIT_RADIUS_PLAYER)) {
         hit = true;
-        damagePlayer(b.damage || COMBAT.BULLET_DAMAGE);
+        damagePlayer(b.damage || COMBAT.BULLET_DAMAGE, 'shot');
         spawnExplosion(b.mesh.position);
       }
       if (hit || b.life <= 0 || b.mesh.position.distanceTo(player.position) > 360) {
@@ -3338,4 +3363,5 @@ if (import.meta.env.DEV) {
     beginBriefing(makeQuickSortie(progress));
     launchSortie();
   };
+  window.__finish = finish;
 }
