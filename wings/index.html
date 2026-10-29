@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#101820" />
+    <meta name="description" content="Wings of Honor — hop in a Spitfire and fly. Fly. Fight. Win." />
+    <meta property="og:title" content="Wings of Honor" />
+    <meta property="og:description" content="Bank to turn, fire, and have fun in a WWII flying game in your browser." />
+    <meta property="og:image" content="/og.png" />
+    <meta property="og:type" content="website" />
+    <title>Wings of Honor</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <main id="game-shell" tabindex="0">
+      <canvas id="game-canvas" aria-label="3D flight game"></canvas>
+      <div id="hud" class="hidden">
+        <div class="hud-top">
+          <div class="mission-card">
+            <small id="hud-mission">MISSION 01 · FLANDERS</small>
+            <strong id="objective">Destroy enemy aircraft</strong>
+            <span id="statusline">Enemies remaining: 3</span>
+          </div>
+          <div class="stats-card">
+            <div><span>SCORE</span><b id="score">000000</b></div>
+            <div><span>ALT</span><b id="alt">024</b></div>
+            <div id="bombs-stat"><span>BOMBS</span><b id="bombs">8</b></div>
+            <div id="fuel-stat" class="hidden"><span>FUEL</span><div class="bar"><i id="fuelbar"></i></div></div>
+            <div><span>HULL</span><div class="bar"><i id="hullbar"></i></div></div>
+            <button id="view-btn" aria-label="Camera">CHASE</button>
+            <button id="pause-btn" aria-label="Pause">Ⅱ</button>
+          </div>
+        </div>
+        <div id="reticle"><i></i><b></b></div>
+        <div id="bombsight" class="hidden">
+          <i></i>
+          <b></b>
+          <span id="bombsight-label">DROP</span>
+        </div>
+        <canvas id="tracer-hud"></canvas>
+        <div id="target-mark" class="hidden">
+          <div id="target-box"></div>
+          <div id="target-label"></div>
+        </div>
+        <div id="radar" aria-label="Tactical radar">
+          <canvas id="radar-canvas" width="176" height="176"></canvas>
+          <span>RADAR</span>
+        </div>
+        <div class="hud-bottom">
+          <div class="control-hint">↓ / S DIVE · B BOMB ON THE DIAMOND · SPACE FIRE · C COCKPIT</div>
+        </div>
+        <div class="touch-controls">
+          <div id="stick-zone" class="stick-zone" draggable="false">
+            <div class="stick-base"><div id="stick-knob"></div></div>
+          </div>
+          <div class="right-controls">
+            <button id="takeoff-btn" class="round-button takeoff hidden" draggable="false">UP</button>
+            <button id="land-btn" class="round-button land hidden" draggable="false">LAND</button>
+            <button id="bomb-btn" class="round-button bomb" draggable="false">BOMB</button>
+            <button id="fire-btn" class="round-button fire" draggable="false">FIRE</button>
+          </div>
+        </div>
+        <div id="land-prompt" class="hidden"></div>
+        <div id="toast"></div>
+        <div id="kill-feed" class="hidden"></div>
+        <div id="mp-living" class="hidden"></div>
+      </div>
+      <div id="invite-banner" class="hidden">
+        <span id="invite-banner-text">A friend wants you in the sky.</span>
+        <button id="invite-banner-accept">ACCEPT</button>
+        <button id="invite-banner-dismiss">LATER</button>
+      </div>
+      <section id="menu" class="screen">
+        <div class="menu-backdrop"></div>
+        <div class="menu-content">
+          <div class="eyebrow">A WWII FLYING GAME</div>
+          <h1>WINGS OF<br><span>HONOR</span></h1>
+          <p class="tagline">FLY. FIGHT. WIN.</p>
+          <p class="intro">Hop in a Spitfire and fly. One hundred missions across five theatres, named aces, and a new Quick Mission every time. Cadet is gentle. Ace is a real scrap. Bank, fire, and have fun.</p>
+          <button id="play-btn" class="primary-btn">PLAY <span>↗</span></button>
+          <button id="campaign-btn" class="primary-btn hidden">CAMPAIGN <span>↗</span></button>
+          <button id="mess-btn" class="secondary-btn menu-quick hidden">PLAY WITH FRIENDS</button>
+          <button id="hangar-btn" class="secondary-btn menu-quick hidden">HANGAR</button>
+          <button id="start-btn" class="secondary-btn menu-quick hidden">QUICK MISSION</button>
+          <div class="diff-row" id="menu-diff">
+            <button data-diff="easy">CADET</button>
+            <button data-diff="normal" class="active">PILOT</button>
+            <button data-diff="hard">ACE</button>
+          </div>
+          <div class="menu-links">
+            <a href="/">SUPER GAMES LAB</a>
+            <button id="how-btn">HOW TO FLY</button>
+            <button id="quality-btn">LOOKS: HIGH</button>
+            <button id="auth-btn">SIGN IN</button>
+            <button id="legal-btn">ABOUT</button>
+          </div>
+          <div class="menu-foot">A fan game · not from any air force or manufacturer · <span id="api-status">playing here</span></div>
+        </div>
+      </section>
+      <section id="campaign-screen" class="screen hidden">
+        <div class="campaign-card">
+          <div class="eyebrow">FIVE THEATRES · 100 MISSIONS</div>
+          <h2>The campaign.</h2>
+          <p class="brief-copy">Fly from Kent to the desert, Fortress Europe, the Pacific, and the last year of the war. Cadet is easier. Ace puts more planes in the sky. Finish a mission to unlock the next one.</p>
+          <div class="diff-row" id="campaign-diff">
+            <button data-diff="easy">CADET</button>
+            <button data-diff="normal" class="active">PILOT</button>
+            <button data-diff="hard">ACE</button>
+          </div>
+          <div class="theater-jump" id="theater-jump"></div>
+          <ol id="mission-list" class="mission-list"></ol>
+          <div class="campaign-actions">
+            <button id="unlock-all-btn" class="secondary-btn hidden">OPEN ALL SORTIES</button>
+            <button id="campaign-back" class="secondary-btn">BACK</button>
+          </div>
+        </div>
+      </section>
+      <section id="briefing-screen" class="screen hidden">
+        <div class="briefing-book">
+          <div class="brief-page brief-left">
+            <div class="eyebrow" id="brief-eyebrow">MISSION 01</div>
+            <h2 id="brief-title">Western Front Patrol</h2>
+            <p class="brief-meta" id="brief-meta">Fields · Clear skies · Pilot</p>
+            <p class="brief-copy" id="brief-copy">Enemy fighters are in the sector.</p>
+            <div class="brief-obj-block">
+              <h3>PRIMARY OBJECTIVES</h3>
+              <ul class="objective-list" id="brief-primary"></ul>
+            </div>
+            <div class="brief-obj-block">
+              <h3>SECONDARY OBJECTIVES</h3>
+              <ul class="objective-list" id="brief-secondary"></ul>
+            </div>
+            <canvas id="brief-photo" class="brief-photo" width="480" height="200" aria-hidden="true"></canvas>
+            <div class="brief-controls">
+              <span><b>↑ / W</b> Climb</span>
+              <span><b>↓ / S</b> Dive</span>
+              <span><b>← →</b> Bank</span>
+              <span><b>Space</b> Fire</span>
+              <span><b>B</b> Bomb</span>
+              <span><b>C</b> Cockpit</span>
+            </div>
+          </div>
+          <div class="brief-page brief-right">
+            <div class="brief-map-wrap">
+              <canvas id="brief-map" width="720" height="560" aria-label="Sector map"></canvas>
+              <div class="brief-legend">
+                <span class="you">▲ You</span>
+                <span class="fighters">● Fighters</span>
+                <span class="depots">■ Depots</span>
+                <span class="marks">◆ Marks</span>
+              </div>
+            </div>
+            <button id="launch-btn" class="primary-btn">START MISSION</button>
+            <button id="brief-back" class="secondary-btn">BACK</button>
+          </div>
+        </div>
+      </section>
+      <section id="hangar-screen" class="screen hidden">
+        <div class="campaign-card hangar-card-wrap">
+          <div class="eyebrow">YOUR HANGAR</div>
+          <h2>Pick a plane.</h2>
+          <p class="brief-copy">The Spitfire is yours from the first flight. Bars show speed, turn, climb, guns, toughness, and dive. Finish missions to unlock more.</p>
+          <div id="hangar-grid" class="hangar-grid"></div>
+          <button id="hangar-back" class="secondary-btn">BACK</button>
+        </div>
+      </section>
+      <section id="pause-screen" class="screen hidden">
+        <div class="dialog">
+          <div class="eyebrow">PAUSED</div>
+          <h2>Catch your breath.</h2>
+          <button id="resume-btn" class="primary-btn">KEEP FLYING</button>
+          <button id="restart-btn" class="secondary-btn">TRY AGAIN</button>
+          <button id="menu-btn" class="secondary-btn">MAIN MENU</button>
+        </div>
+      </section>
+      <section id="result-screen" class="screen hidden">
+        <div class="dialog">
+          <div class="eyebrow">NICE FLYING</div>
+          <h2 id="result-title">MISSION COMPLETE</h2>
+          <p id="result-copy">The sky is yours.</p>
+          <p id="result-stars" class="brief-meta"></p>
+          <p id="result-unlock" class="brief-copy"></p>
+          <div class="result-score"><small>FINAL SCORE</small><strong id="final-score">000000</strong></div>
+          <div id="leaderboard" class="leaderboard hidden"><small>TOP PILOTS</small><ol id="leaderboard-list"></ol></div>
+          <button id="next-btn" class="primary-btn">NEXT MISSION <span>↗</span></button>
+          <button id="again-btn" class="secondary-btn">FLY AGAIN</button>
+          <button id="report-btn" class="secondary-btn hidden">THAT WASN'T FAIR</button>
+          <button id="result-menu-btn" class="secondary-btn">MAIN MENU</button>
+        </div>
+      </section>
+      <section id="help-screen" class="screen hidden">
+        <div class="dialog help-dialog">
+          <div class="eyebrow">HOW TO FLY</div>
+          <h2>Easy as pie.</h2>
+          <div class="help-grid">
+            <p><b>CLIMB / DIVE</b><br>W or ↑ pulls the nose up. S or ↓ points it down. Aim, then fire.</p>
+            <p><b>TURN</b><br>A / ← and D / → tilt the wings. The plane turns the way you lean.</p>
+            <p><b>FIRE</b><br>Hold SPACE or FIRE. Named aces like Hartmann take more hits and are worth extra points.</p>
+            <p><b>BOMBS &amp; MAP</b><br>On bomb missions, put the diamond on the target and press B. Red dots on the little map are planes. Gold is stuff on the ground.</p>
+            <p><b>COCKPIT</b><br>Press C to sit inside the plane. Press it again to fly behind it.</p>
+            <p><b>HANGAR</b><br>Finish campaign missions to unlock more planes.</p>
+            <p><b>HOME FIELD</b><br>On later campaign jobs, hold FIRE on the grass to taxi, then press T when the HUD says TAKE OFF. Line up with the sheds, wait for LAND, press L. Tanks and bombs fill up. Cadet, Quick Mission, and Hunt skip this.</p>
+          </div>
+          <button id="help-close" class="primary-btn">GOT IT</button>
+        </div>
+      </section>
+      <section id="auth-screen" class="screen hidden">
+        <div class="dialog">
+          <div class="eyebrow">SIGN IN</div>
+          <h2>No password.</h2>
+          <p class="brief-copy">Type an email. We'll send a magic link. Friends can invite you the same way, even before you pick a name.</p>
+          <input id="auth-email" class="field" type="email" placeholder="you@example.com" autocomplete="email" />
+          <p id="auth-status" class="brief-meta"></p>
+          <button id="auth-send" class="primary-btn">SEND LINK</button>
+          <button id="auth-close" class="secondary-btn">BACK</button>
+        </div>
+      </section>
+      <section id="callsign-screen" class="screen hidden">
+        <div class="dialog">
+          <div class="eyebrow">PILOT NAME</div>
+          <h2>What should we call you?</h2>
+          <p class="brief-copy">3–16 letters, numbers, or underscore. Friends use this name to find you.</p>
+          <input id="callsign-input" class="field" maxlength="16" placeholder="sky_kid" />
+          <label class="check"><input id="age-gate" type="checkbox" /> I'm 13 or older, or a grown-up said this is OK.</label>
+          <p id="callsign-status" class="brief-meta"></p>
+          <button id="callsign-save" class="primary-btn">THAT'S ME</button>
+        </div>
+      </section>
+      <section id="mess-screen" class="screen hidden">
+        <div class="campaign-card mess-card">
+          <div class="eyebrow">FRIENDS · <span id="mess-who">GUEST</span></div>
+          <h2>Fly together.</h2>
+          <p id="mess-offline" class="brief-copy hidden">Friends mode is taking a rest. You can still fly the campaign.</p>
+          <p id="mess-status" class="brief-meta"></p>
+          <div class="mess-tabs" id="mess-tabs">
+            <button data-tab="hunt" class="active">HUNT</button>
+            <button data-tab="duel">DUEL</button>
+            <button data-tab="squadron">SQUADRON</button>
+            <button data-tab="logbook">LOGBOOK</button>
+            <button data-tab="shop">HANGAR</button>
+          </div>
+          <div id="mess-hunt" class="mess-pane">
+            <p class="brief-copy">Practice is you versus computer planes — start right away. Open a room or find a friend when you want a wingman. They join the next flight, not one that's already going.</p>
+            <label class="field-label">Difficulty
+              <select id="mess-diff" class="field">
+                <option value="easy">Cadet</option>
+                <option value="normal" selected>Pilot</option>
+                <option value="hard">Ace</option>
+              </select>
+            </label>
+            <label class="field-label">Which mission?
+              <input id="mess-mission" class="field" type="number" min="1" max="100" value="3" />
+            </label>
+            <button id="hunt-practice" class="primary-btn">PRACTICE</button>
+            <button id="hunt-create" class="secondary-btn">OPEN A ROOM</button>
+            <button id="hunt-quick" class="secondary-btn">FIND A FRIEND</button>
+          </div>
+          <div id="mess-duel" class="mess-pane hidden">
+            <p class="brief-copy">Two teams. Last plane flying wins. Ranked needs even sides and a squadron. One-on-one is just for fun.</p>
+            <label class="check"><input id="duel-ranked" type="checkbox" /> Ranked (teams of 2 or more)</label>
+            <label class="check"><input id="duel-patrol" type="checkbox" /> Practice duel (3 lives)</label>
+            <label class="field-label">Challenge tag
+              <input id="duel-tag" class="field" maxlength="4" placeholder="RFC" />
+            </label>
+            <button id="duel-create" class="primary-btn">OPEN DUEL</button>
+          </div>
+          <div id="mess-squadron" class="mess-pane hidden">
+            <div id="squadron-create-form">
+              <input id="squadron-name" class="field" placeholder="Squadron name" maxlength="32" />
+              <input id="squadron-tag" class="field" placeholder="TAG" maxlength="4" />
+              <button id="squadron-create" class="primary-btn">RAISE SQUADRON</button>
+            </div>
+            <div id="squadron-detail" class="hidden">
+              <p class="sq-name"></p>
+              <p class="brief-meta sq-role"></p>
+              <ul class="sq-roster mission-list"></ul>
+              <button id="squadron-leave" class="secondary-btn">LEAVE</button>
+            </div>
+            <p id="squadron-status" class="brief-meta"></p>
+            <div class="invite-row">
+              <select id="invite-kind" class="field"><option value="squadron">Squadron</option></select>
+              <input id="invite-who" class="field" placeholder="pilot name or email" />
+              <button id="invite-send" class="secondary-btn">INVITE</button>
+            </div>
+            <p id="invite-status" class="brief-meta"></p>
+            <div id="recent-list" class="recent-list"></div>
+          </div>
+          <div id="mess-logbook" class="mess-pane hidden">
+            <div id="logbook-body"></div>
+          </div>
+          <div id="mess-shop" class="mess-pane hidden">
+            <p class="brief-copy">Optional paint for your plane. It never makes you faster or stronger. Flying stays free.</p>
+            <div id="shop-list"></div>
+            <p id="shop-status" class="brief-meta"></p>
+          </div>
+          <div class="campaign-actions">
+            <button id="logout-btn" class="secondary-btn">SIGN OUT</button>
+            <button id="delete-btn" class="secondary-btn">DELETE ACCOUNT</button>
+            <button id="mess-back" class="secondary-btn">BACK</button>
+          </div>
+        </div>
+      </section>
+      <section id="lobby-screen" class="screen hidden">
+        <div class="dialog">
+          <div class="eyebrow">READY ROOM</div>
+          <h2 id="lobby-title">Hunt</h2>
+          <p id="lobby-meta" class="brief-meta"></p>
+          <ul id="lobby-roster" class="lobby-roster"></ul>
+          <p class="brief-copy">Tap Ready when you're set. We start when everyone is ready, or after a short wait.</p>
+          <button id="lobby-ready" class="primary-btn">READY</button>
+          <button id="lobby-host" class="secondary-btn hidden">START NOW</button>
+          <button id="lobby-invite" class="secondary-btn">INVITE A FRIEND</button>
+          <button id="lobby-leave" class="secondary-btn">LEAVE</button>
+        </div>
+      </section>
+      <section id="forfeit-screen" class="screen hidden">
+        <div class="dialog">
+          <div class="eyebrow">LEAVE?</div>
+          <h2>Hop out?</h2>
+          <p class="brief-copy">There's no pause with friends. Leaving a Duel counts as being shot down.</p>
+          <button id="forfeit-yes" class="primary-btn">LEAVE</button>
+          <button id="forfeit-no" class="secondary-btn">KEEP FLYING</button>
+        </div>
+      </section>
+      <section id="legal-screen" class="screen hidden">
+        <div class="dialog help-dialog">
+          <div class="eyebrow">FOR FAMILIES</div>
+          <h2>A friendly flying game.</h2>
+          <p class="brief-copy">If you're under 13, please ask a grown-up. We may keep a tiny note of how the game is going so we can make it nicer — never your real name, and never for ads. We don't sell anything about you. Sign-in mail is only the link to play. Plane paint is just looks. This is a fan game, not from any air force or manufacturer. Need help? Write to <span id="support-mail">the address on this page</span>.</p>
+          <button id="legal-close" class="primary-btn">GOT IT</button>
+        </div>
+      </section>
+      <section id="age-screen" class="screen hidden">
+        <div class="dialog">
+          <div class="eyebrow">QUICK CHECK</div>
+          <h2>Got a grown-up nearby?</h2>
+          <p class="brief-copy">If you're under 13, ask a parent first. You can still fly either way. We only keep a tiny note of how the game is going so we can make it nicer — never your name, never for ads.</p>
+          <button id="age-yes" class="primary-btn">OK, LET'S FLY</button>
+          <button id="age-no" class="secondary-btn">JUST PLAY</button>
+        </div>
+      </section>
+      <section id="webgl-fail" class="screen hidden">
+        <div class="dialog">
+          <div class="eyebrow">OH NO</div>
+          <h2>This screen can't fly the game.</h2>
+          <p class="brief-copy">Try another browser — Chrome, Edge, Firefox, or Safari usually work. If you're in a tiny window on another site, open the full game instead.</p>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

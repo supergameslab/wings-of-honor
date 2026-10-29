@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en" class="portal">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#101820" />
+    <meta name="description" content="Super Games Lab — games you can hop into in the browser. First up: Wings of Honor." />
+    <meta property="og:title" content="Super Games Lab" />
+    <meta property="og:description" content="A hangar of games. Fly Wings of Honor now." />
+    <meta property="og:image" content="/og.png" />
+    <meta property="og:type" content="website" />
+    <title>Super Games Lab</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body class="portal">
+    <div id="lab">
+      <header class="lab-top">
+        <div class="eyebrow">SUPER GAMES LAB</div>
+        <h1>Games you can hop into.</h1>
+        <p class="lab-lead">A small hangar of browser games. Pick one, play, come back for the next.</p>
+        <nav class="lab-nav">
+          <a href="#games">Games</a>
+          <a href="#board">Scores</a>
+          <a href="/wings/">Play Wings of Honor</a>
+        </nav>
+      </header>
+
+      <section id="games" class="lab-section">
+        <div class="eyebrow">IN THE HANGAR</div>
+        <h2>Games</h2>
+        <div class="lab-grid">
+          <article class="lab-card live">
+            <small>WWII · FLYING</small>
+            <h3>Wings of Honor</h3>
+            <p>Hop in a Spitfire. One hundred missions, five theatres, and play with friends. Cadet is gentle. Ace is a scrap.</p>
+            <ul class="lab-facts">
+              <li>Campaign + Quick Mission</li>
+              <li>Hunt with friends</li>
+              <li>How to fly is in the hangar</li>
+            </ul>
+            <a class="primary-btn" href="/wings/">PLAY <span>↗</span></a>
+            <a class="lab-more" href="/wings/">Game page, campaign, friends, and instructions</a>
+          </article>
+          <article class="lab-card soon">
+            <small>WWI SISTER GAME</small>
+            <h3>Sopwith: Iron Skies</h3>
+            <p>Biplanes, aces, and the Western Front. Same hangar family, different war. Play it from the Iron Skies project.</p>
+            <span class="lab-pill">SISTER TITLE</span>
+          </article>
+        </div>
+      </section>
+
+      <section id="board" class="lab-section">
+        <div class="eyebrow">ALOFT TODAY</div>
+        <h2>Scores</h2>
+        <p class="lab-lead">Top Wings of Honor flights. Sign in inside the game to put a name on the board.</p>
+        <ol id="lab-board" class="lab-board">
+          <li>Loading…</li>
+        </ol>
+      </section>
+
+      <footer class="lab-foot">
+        Super Games Lab · fan games, not from any air force or manufacturer ·
+        <a href="/wings/">Wings of Honor</a>
+      </footer>
+    </div>
+    <script type="module" src="/src/portal.js"></script>
+  </body>
+</html>

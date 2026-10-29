@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Wings of Honor · Ops</title>
+    <link rel="stylesheet" href="/src/style.css" />
+    <style>
+      html,body{overflow:auto;height:auto;background:#101b21;touch-action:auto}
+      #ops{max-width:980px;margin:24px auto;padding:0 16px 80px}
+      table{width:100%;border-collapse:collapse;font-size:12px;margin:12px 0}
+      th,td{border-bottom:1px solid #ffffff22;padding:6px 8px;text-align:left}
+      .ops-nav{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+      .ops-nav button{background:#ffffff10;border:1px solid #ffffff30;padding:8px 12px}
+      textarea,input{width:100%;background:#0b151b;border:1px solid #ffffff30;color:#e9e2d1;padding:8px;margin:6px 0}
+      pre{white-space:pre-wrap;font-size:12px;background:#0b151b;padding:12px}
+    </style>
+  </head>
+  <body>
+    <main id="ops">
+      <div class="eyebrow">IRON SKIES</div>
+      <h1>Ops</h1>
+      <div id="login">
+        <p class="brief-copy">Staff only. Secret is never in the URL.</p>
+        <input id="secret" type="password" placeholder="ADMIN_SECRET" />
+        <button id="login-btn" class="primary-btn">ENTER</button>
+        <p id="login-status" class="brief-meta"></p>
+      </div>
+      <div id="desk" class="hidden">
+        <div class="ops-nav">
+          <button data-page="overview">Overview</button>
+          <button data-page="funnel">Funnel</button>
+          <button data-page="campaign">Campaign</button>
+          <button data-page="mp">Multiplayer</button>
+          <button data-page="players">Players</button>
+          <button data-page="economy">Economy</button>
+          <button data-page="flags">Flags</button>
+          <button data-page="capture">Capture</button>
+          <a href="/api/ops/csv?table=funnel">CSV funnel</a>
+          <a href="/api/ops/csv?table=mission">CSV missions</a>
+          <button id="logout-btn">Leave</button>
+        </div>
+        <div id="ops-body"></div>
+      </div>
+    </main>
+    <script type="module" src="/src/ops.js"></script>
+  </body>
+</html>
