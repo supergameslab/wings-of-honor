@@ -443,6 +443,7 @@ describe('combat and ai', () => {
     expect(cockpitGuns('mustang').offsets).toHaveLength(2);
     expect(COCKPIT_CAM.y).toBe(COCKPIT_SIGHT.y);
     expect(COCKPIT_CAM.x).toBe(COCKPIT_SIGHT.x);
+    expect(COCKPIT_CAM.z).toBeGreaterThan(0.35);
   });
 
   it('Mustang dives faster than Spitfire', () => {

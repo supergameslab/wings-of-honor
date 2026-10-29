@@ -673,14 +673,14 @@ function setView(next = viewMode === 'cockpit' ? 'chase' : 'cockpit') {
   if (btn) btn.textContent = pit ? 'COCKPIT' : 'CHASE';
   if (pit && player) {
     player.add(camera);
-    const cam = player.userData.cockpitCam || { x: 0, y: 0.32, z: 0.16 };
+    const cam = player.userData.cockpitCam || { x: 0, y: 0.28, z: 0.5, look: -0.1 };
     camera.position.set(cam.x, cam.y, cam.z);
-    camera.rotation.set(0, 0, 0);
-    camera.fov = 70;
-    camera.near = 0.06;
+    camera.rotation.set(cam.look ?? -0.1, 0, 0);
+    camera.fov = 62;
+    camera.near = 0.05;
     if (!player.userData.pitLamp && player.userData.cockpit) {
-      const lamp = new THREE.PointLight(0xffe1b0, 0.65, 2.6);
-      lamp.position.set(0, 0.28, 0.04);
+      const lamp = new THREE.PointLight(0xffe8c0, 1.15, 3.2);
+      lamp.position.set(0, 0.22, 0.12);
       player.userData.cockpit.add(lamp);
       player.userData.pitLamp = lamp;
     }
@@ -2102,29 +2102,54 @@ const hangarStudio = {
   model: null,
 };
 
+function lightenHangarModel(root) {
+  root.traverse((obj) => {
+    if (!obj.isMesh || !obj.material) return;
+    const wrap = (m) => {
+      const c = m.clone();
+      if (c.metalness != null) c.metalness = Math.min(c.metalness, 0.08);
+      if (c.roughness != null) c.roughness = Math.max(c.roughness, 0.58);
+      if ('envMapIntensity' in c) c.envMapIntensity = 0;
+      if (c.color) {
+        c.emissive = c.color.clone();
+        c.emissiveIntensity = 0.32;
+      }
+      return c;
+    };
+    obj.material = Array.isArray(obj.material) ? obj.material.map(wrap) : wrap(obj.material);
+    obj.castShadow = false;
+    obj.receiveShadow = false;
+  });
+}
+
 function ensureHangarStudio() {
   if (hangarStudio.scene) return;
   const sc = new THREE.Scene();
-  sc.background = new THREE.Color(0x243040);
-  const cam = new THREE.PerspectiveCamera(36, 2, 0.1, 80);
-  cam.position.set(4.6, 4.8, -5.4);
-  cam.lookAt(0, 0.05, 0.25);
-  sc.add(new THREE.HemisphereLight(0xf2f6fa, 0x6a6458, 2.4));
-  const key = new THREE.DirectionalLight(0xfff4e6, 5.2);
-  key.position.set(8, 10, -7);
+  sc.background = new THREE.Color(0x8a96a2);
+  sc.environment = null;
+  const cam = new THREE.PerspectiveCamera(26, 2, 0.2, 80);
+  cam.position.set(9.2, 2.55, -11.4);
+  cam.lookAt(0, 0.12, 0.35);
+  sc.add(new THREE.AmbientLight(0xf2f6fa, 2.2));
+  sc.add(new THREE.HemisphereLight(0xffffff, 0x9a9488, 2.4));
+  const key = new THREE.DirectionalLight(0xfff6ea, 3.4);
+  key.position.set(10, 12, -8);
   sc.add(key);
-  const fillL = new THREE.DirectionalLight(0xc5d8ec, 1.8);
-  fillL.position.set(-7, 5, 4);
+  const fillL = new THREE.DirectionalLight(0xd8e8f8, 2.2);
+  fillL.position.set(-10, 6, 4);
   sc.add(fillL);
-  const rim = new THREE.DirectionalLight(0xe8f2ff, 1.2);
-  rim.position.set(-3, 5, -8);
+  const rim = new THREE.DirectionalLight(0xf4f8ff, 2.0);
+  rim.position.set(-4, 5, -12);
   sc.add(rim);
+  const bounce = new THREE.DirectionalLight(0xffe6c8, 1.2);
+  bounce.position.set(2, -4, 3);
+  sc.add(bounce);
   const floor = new THREE.Mesh(
-    new THREE.CircleGeometry(12, 28),
-    new THREE.MeshBasicMaterial({ color: 0x162028 }),
+    new THREE.CircleGeometry(18, 28),
+    new THREE.MeshBasicMaterial({ color: 0x6a7580 }),
   );
   floor.rotation.x = -Math.PI / 2;
-  floor.position.y = -1.18;
+  floor.position.y = -1.15;
   sc.add(floor);
   hangarStudio.scene = sc;
   hangarStudio.cam = cam;
@@ -2138,17 +2163,26 @@ function paintHangarThumb(cv, craft) {
     hangarStudio.model = null;
   }
   const model = makeAircraft({ type: craft.id, gear: true });
-  model.rotation.set(0.1, 0.46, 0.22);
-  hangarStudio.scene.environment = scene.environment;
-  hangarStudio.scene.environmentIntensity = 0.85;
+  lightenHangarModel(model);
+  model.rotation.set(0.1, 0.78, 0.06);
+  hangarStudio.cam.position.set(9.2, 2.55, -11.4);
+  hangarStudio.cam.lookAt(0, 0.12, 0.35);
+  hangarStudio.cam.fov = 26;
+  hangarStudio.cam.updateProjectionMatrix();
+  hangarStudio.scene.environment = null;
+  hangarStudio.scene.environmentIntensity = 0;
   hangarStudio.scene.add(model);
   hangarStudio.model = model;
   const prev = renderer.getRenderTarget();
   const prevClear = new THREE.Color();
   renderer.getClearColor(prevClear);
   const prevAlpha = renderer.getClearAlpha();
+  const prevTM = renderer.toneMapping;
+  const prevExp = renderer.toneMappingExposure;
+  renderer.toneMapping = THREE.NoToneMapping;
+  renderer.toneMappingExposure = 1;
   renderer.setRenderTarget(hangarStudio.rt);
-  renderer.setClearColor(0x101920, 1);
+  renderer.setClearColor(0x7a8794, 1);
   renderer.clear();
   renderer.render(hangarStudio.scene, hangarStudio.cam);
   const w = hangarStudio.rt.width;
@@ -2157,6 +2191,8 @@ function paintHangarThumb(cv, craft) {
   renderer.readRenderTargetPixels(hangarStudio.rt, 0, 0, w, h, buf);
   renderer.setRenderTarget(prev);
   renderer.setClearColor(prevClear, prevAlpha);
+  renderer.toneMapping = prevTM;
+  renderer.toneMappingExposure = prevExp;
   const img = new ImageData(w, h);
   for (let y = 0; y < h; y++) {
     img.data.set(buf.subarray((h - 1 - y) * w * 4, (h - y) * w * 4), y * w * 4);
@@ -3283,6 +3319,21 @@ if (import.meta.env.DEV) {
   window.__openHangar = openHangar;
   window.__hangarStudio = hangarStudio;
   window.__setSide = setSide;
+  window.__setCraft = (id) => {
+    const craft = craftById(id);
+    if (!craft) return;
+    progress.side = planeSide(craft);
+    progress.craftId = craft.id;
+    progress.unlocked = Math.max(progress.unlocked || 1, craft.unlock || 1, 99);
+    saveProgress(progress);
+  };
+  window.__mute = () => {
+    wantSound = false;
+    killEngineOsc();
+    for (const ctx of window.__wingsHonorAudio || []) {
+      try { ctx.suspend(); } catch {}
+    }
+  };
   window.__quick = () => {
     beginBriefing(makeQuickSortie(progress));
     launchSortie();

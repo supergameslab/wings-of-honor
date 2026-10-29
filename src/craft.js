@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PLANES, planeById, isCraftUnlocked, cockpitGuns, COCKPIT_SIGHT, COCKPIT_CAM, gunLayout, sightFor } from './sim/planes.js';
+import { PLANES, planeById, isCraftUnlocked, cockpitGuns, COCKPIT_CAM, gunLayout, sightFor } from './sim/planes.js';
 
 export const CRAFTS = PLANES.filter((p) => !p.aiOnly);
 export const craftById = planeById;
@@ -824,148 +824,297 @@ function makeGauge(label) {
   return g;
 }
 
+function drawDial(ctx, cx, cy, r, label = '', face = '#0c0c0a') {
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fillStyle = face;
+  ctx.fill();
+  ctx.strokeStyle = '#8a8474';
+  ctx.lineWidth = Math.max(1.2, r * 0.08);
+  ctx.stroke();
+  ctx.strokeStyle = '#c8c0a8';
+  ctx.lineWidth = 1;
+  const ticks = r > 18 ? 12 : 8;
+  for (let i = 0; i < ticks; i++) {
+    const a = -Math.PI * 0.8 + (i / (ticks - 1)) * Math.PI * 1.6;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * r * 0.62, cy + Math.sin(a) * r * 0.62);
+    ctx.lineTo(cx + Math.cos(a) * r * 0.88, cy + Math.sin(a) * r * 0.88);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = '#e8c070';
+  ctx.lineWidth = 1.3;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(cx + r * 0.42, cy - r * 0.32);
+  ctx.stroke();
+  if (label) {
+    ctx.fillStyle = '#c4b898';
+    ctx.font = `bold ${Math.max(7, Math.round(r * 0.28))}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(label, cx, cy + r * 0.52);
+  }
+}
+
+function panelArt(type) {
+  const W = 512;
+  const H = 256;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const x = c.getContext('2d');
+  x.fillStyle = type === 'stuka' || type === 'bf109' ? '#141612' : '#161616';
+  x.fillRect(0, 0, W, H);
+  if (type === 'stuka') {
+    x.fillStyle = '#7a4e2c';
+    x.fillRect(0, 0, W, 28);
+    x.fillStyle = '#9a6840';
+    x.fillRect(18, 4, W - 36, 18);
+    [
+      [90, 70, 22, ''],
+      [148, 64, 28, ''],
+      [210, 58, 34, ''],
+      [272, 58, 34, ''],
+      [334, 64, 28, ''],
+      [396, 70, 22, ''],
+      [118, 122, 18, ''],
+      [168, 128, 24, ''],
+      [226, 132, 20, ''],
+      [278, 132, 20, ''],
+      [336, 128, 24, ''],
+      [390, 122, 18, ''],
+      [168, 186, 16, ''],
+      [226, 190, 18, ''],
+      [286, 190, 18, ''],
+      [344, 186, 16, ''],
+    ].forEach(([cx, cy, r, label]) => drawDial(x, cx, cy, r, label));
+    x.fillStyle = '#2a2c24';
+    x.fillRect(28, 150, 52, 72);
+    x.fillStyle = '#c4a24a';
+    x.fillRect(430, 150, 18, 70);
+  } else if (type === 'bf109') {
+    x.fillStyle = '#0e100e';
+    x.beginPath();
+    x.moveTo(70, 18);
+    x.lineTo(442, 18);
+    x.lineTo(500, 250);
+    x.lineTo(12, 250);
+    x.closePath();
+    x.fill();
+    [
+      [168, 52, 16, ''],
+      [214, 44, 20, ''],
+      [262, 40, 18, ''],
+      [310, 44, 20, ''],
+      [356, 52, 16, ''],
+      [150, 104, 28, ''],
+      [214, 100, 32, ''],
+      [286, 100, 32, ''],
+      [350, 104, 28, ''],
+      [168, 168, 18, ''],
+      [226, 172, 22, ''],
+      [286, 172, 22, ''],
+      [344, 168, 18, ''],
+      [226, 222, 14, ''],
+      [286, 222, 14, ''],
+    ].forEach(([cx, cy, r, label]) => drawDial(x, cx, cy, r, label));
+    x.fillStyle = '#1c1e1a';
+    x.fillRect(40, 150, 70, 80);
+    x.fillRect(400, 150, 70, 80);
+  } else if (type === 'spitfire') {
+    [
+      [140, 70, 32, 'ASI'],
+      [210, 62, 36, 'ALT'],
+      [284, 70, 32, 'RPM'],
+      [140, 148, 28, 'BOOST'],
+      [210, 154, 30, 'TURN'],
+      [284, 148, 28, 'FUEL'],
+      [356, 88, 18, ''],
+      [356, 132, 16, ''],
+      [88, 110, 16, ''],
+      [88, 154, 14, ''],
+      [210, 222, 20, ''],
+    ].forEach(([cx, cy, r, label]) => drawDial(x, cx, cy, r, label));
+    x.fillStyle = '#2a4a8a';
+    x.fillRect(390, 70, 22, 22);
+    x.fillStyle = '#8a2a1c';
+    x.fillRect(418, 70, 22, 22);
+  } else if (type === 'zero' || type === 'oscar') {
+    x.fillStyle = '#3a4630';
+    x.fillRect(0, 0, 40, H);
+    x.fillRect(W - 40, 0, 40, H);
+    [
+      [130, 78, 30, 'ASI'],
+      [200, 70, 34, 'ALT'],
+      [274, 70, 34, 'RPM'],
+      [348, 78, 30, 'OIL'],
+      [168, 150, 20, ''],
+      [230, 156, 22, ''],
+      [294, 150, 20, ''],
+      [230, 210, 16, ''],
+    ].forEach(([cx, cy, r, label]) => drawDial(x, cx, cy, r, label));
+  } else {
+    [
+      [120, 72, 30, 'ASI'],
+      [188, 64, 34, 'ALT'],
+      [260, 64, 34, 'RPM'],
+      [328, 72, 30, type === 'mustang' ? 'MP' : 'FUEL'],
+      [156, 140, 22, 'OIL'],
+      [214, 146, 24, 'TEMP'],
+      [274, 146, 24, ''],
+      [332, 140, 22, ''],
+      [120, 200, 16, ''],
+      [188, 206, 18, ''],
+      [260, 206, 18, ''],
+      [328, 200, 16, ''],
+      [396, 100, 16, ''],
+      [396, 148, 16, ''],
+    ].forEach(([cx, cy, r, label]) => drawDial(x, cx, cy, r, label));
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+
+const panelTexCache = {};
+function panelTexture(type) {
+  if (!panelTexCache[type]) panelTexCache[type] = panelArt(type);
+  return panelTexCache[type];
+}
+
 function pitTheme(type) {
+  const cam = { x: COCKPIT_CAM.x, y: COCKPIT_CAM.y, z: COCKPIT_CAM.z, look: -0.1 };
   const themes = {
     spitfire: {
-      pit: 0x4a5348,
-      dash: 0x1c1e1a,
+      pit: 0x6a7a68,
+      dash: 0x141614,
       leather: 0x6a4030,
       gauges: ['ASI', 'ALT', 'RPM', 'BOOST'],
       stick: 'spade',
       sight: 'aldis',
       width: 0.94,
-      cam: { x: 0, y: 0.34, z: 0.16 },
+      cam,
     },
     p40: {
-      pit: 0x3a5a3c,
-      dash: 0x22261e,
+      pit: 0x3d5a38,
+      dash: 0x1a1e16,
       leather: 0x4a3224,
       gauges: ['ASI', 'ALT', 'RPM', 'FUEL'],
       stick: 'us',
       sight: 'n9',
       width: 0.96,
-      cam: { x: 0, y: 0.33, z: 0.18 },
+      cam,
     },
     mustang: {
-      pit: 0x3c4a3c,
-      dash: 0x141618,
+      pit: 0x3a4a38,
+      dash: 0x121416,
       leather: 0x3a281c,
       gauges: ['ASI', 'ALT', 'RPM', 'MP'],
       stick: 'us',
       sight: 'n9',
       width: 1.0,
-      cam: { x: 0, y: 0.36, z: 0.2 },
+      cam: { ...cam, look: -0.08 },
     },
     hellcat: {
-      pit: 0x2a3a32,
-      dash: 0x121416,
+      pit: 0x2e3a34,
+      dash: 0x101214,
       leather: 0x2e241c,
       gauges: ['ASI', 'ALT', 'RPM', 'FUEL'],
       stick: 'us',
       sight: 'n9',
       width: 1.05,
-      cam: { x: 0, y: 0.35, z: 0.18 },
+      cam,
     },
     stuka: {
-      pit: 0x5a6248,
-      dash: 0x2a2c24,
-      leather: 0x8a6a38,
+      pit: 0x6a7458,
+      dash: 0x141612,
+      leather: 0x8a5a30,
       gauges: ['FAHRT', 'HOEHE', 'DREZ', 'KRAFT'],
       stick: 'german',
       sight: 'revi',
       width: 1.02,
-      cam: { x: 0, y: 0.38, z: 0.22 },
+      cam: { ...cam, look: -0.12 },
     },
     bf109: {
-      pit: 0x3a403c,
-      dash: 0x1a1c1a,
+      pit: 0x5a6a58,
+      dash: 0x101210,
       leather: 0x4a3828,
       gauges: ['FAHRT', 'HOEHE', 'DREZ', 'BOOST'],
       stick: 'german',
       sight: 'revi',
-      width: 0.82,
-      cam: { x: 0, y: 0.3, z: 0.22 },
+      width: 0.86,
+      cam: { ...cam, look: -0.12 },
     },
     zero: {
-      pit: 0x6a7a50,
-      dash: 0x2c2a22,
+      pit: 0x6a7a52,
+      dash: 0x222018,
       leather: 0x5a4030,
       gauges: ['ASI', 'ALT', 'RPM', 'OIL'],
       stick: 'ijn',
       sight: 'type99',
       width: 0.9,
-      cam: { x: 0, y: 0.32, z: 0.18 },
+      cam,
     },
     oscar: {
       pit: 0x74805a,
-      dash: 0x2a281e,
+      dash: 0x222018,
       leather: 0x6a4a32,
       gauges: ['ASI', 'ALT', 'RPM', 'OIL'],
       stick: 'ijn',
       sight: 'type99',
       width: 0.88,
-      cam: { x: 0, y: 0.32, z: 0.18 },
+      cam,
     },
   };
   return themes[type] || themes.spitfire;
 }
 
-function addGunsight(g, kind, pos) {
-  const x = pos.x;
-  const y = pos.y;
-  const z = pos.z;
-  if (kind === 'revi') {
-    const house = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.1, 0.16), mats.darkMetal);
-    house.position.set(x, y - 0.04, z + 0.08);
-    g.add(house);
-    const glass = new THREE.Mesh(new THREE.PlaneGeometry(0.11, 0.09), mats.glass);
-    glass.position.set(x, y + 0.02, z);
-    g.add(glass);
-    const bead = new THREE.Mesh(new THREE.SphereGeometry(0.007, 8, 6), mat(0xf0c45a, 0.3, 0.2));
-    bead.position.set(x, y + 0.01, z - 0.01);
-    g.add(bead);
-    return;
-  }
-  if (kind === 'n9') {
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.014, 0.12, 8), mats.darkMetal);
-    post.position.set(x, y - 0.08, z + 0.06);
+function addGunsight() {
+  // Aim mark is the HUD reticle. 3D sight bodies in the look path read as
+  // floating boxes (Revi) or off-center rings (Type 99).
+}
+
+function addWindscreen(g, type, w, pitHex) {
+  const frame = new THREE.MeshBasicMaterial({ color: pitHex });
+  const postH = type === 'stuka' ? 0.52 : 0.46;
+  for (const side of [-1, 1]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.014, postH, 6), frame);
+    post.position.set(side * w * 0.4, 0.3, -0.3);
+    post.rotation.z = side * 0.28;
+    post.rotation.x = 0.16;
     g.add(post);
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.08, 0.006, 8, 24), mats.metal);
-    ring.position.set(x, y, z);
-    g.add(ring);
-    const glass = new THREE.Mesh(new THREE.CircleGeometry(0.07, 20), mats.glass);
-    glass.position.set(x, y, z);
-    g.add(glass);
-    const bead = new THREE.Mesh(new THREE.SphereGeometry(0.008, 8, 6), mats.brass);
-    bead.position.set(x, y, z - 0.01);
-    g.add(bead);
-    return;
   }
-  if (kind === 'type99') {
-    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.036, 0.22, 10), mats.darkMetal);
-    tube.rotation.x = Math.PI / 2;
-    tube.position.set(x, y - 0.02, z + 0.06);
-    g.add(tube);
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.055, 0.005, 8, 18), mat(0xe8b86a, 0.4, 0.35));
-    ring.position.set(x, y, z);
-    g.add(ring);
-    const bead = new THREE.Mesh(new THREE.SphereGeometry(0.006, 8, 6), mat(0xe8b86a));
-    bead.position.set(x, y, z);
-    g.add(bead);
-    return;
+  const bowR = w * (type === 'bf109' ? 0.4 : 0.43);
+  const bow = new THREE.Mesh(new THREE.TorusGeometry(bowR, 0.012, 6, 18, Math.PI), frame);
+  bow.rotation.x = Math.PI / 2 + 0.12;
+  bow.position.set(0, type === 'stuka' ? 0.56 : 0.52, -0.24);
+  g.add(bow);
+  if (type === 'stuka') {
+    const mid = new THREE.Mesh(new THREE.TorusGeometry(bowR * 0.92, 0.01, 6, 16, Math.PI), frame);
+    mid.rotation.x = Math.PI / 2 + 0.18;
+    mid.position.set(0, 0.38, -0.28);
+    g.add(mid);
+    for (const side of [-1, 1]) {
+      const rib = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.28, 6), frame);
+      rib.position.set(side * w * 0.18, 0.46, -0.26);
+      rib.rotation.x = 0.4;
+      g.add(rib);
+    }
   }
-  const glass = new THREE.Mesh(new THREE.CircleGeometry(0.09, 22), mats.glass);
-  glass.position.set(x, y, z);
+  const glass = new THREE.Mesh(
+    new THREE.PlaneGeometry(w * 0.72, type === 'stuka' ? 0.48 : 0.4),
+    new THREE.MeshBasicMaterial({
+      color: 0xb9d4e4,
+      transparent: true,
+      opacity: 0.06,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    }),
+  );
+  glass.position.set(0, 0.34, -0.32);
+  glass.rotation.x = -0.08;
   g.add(glass);
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.006, 8, 24), mats.darkMetal);
-  ring.position.set(x, y, z);
-  g.add(ring);
-  const inner = new THREE.Mesh(new THREE.TorusGeometry(0.03, 0.003, 6, 16), mats.brass);
-  inner.position.set(x, y, z);
-  g.add(inner);
-  const bead = new THREE.Mesh(new THREE.SphereGeometry(0.007, 8, 6), mats.brass);
-  bead.position.set(x, y, z);
-  g.add(bead);
 }
 
 function makeStick(kind) {
@@ -1005,84 +1154,100 @@ function makeCockpitInterior(type = 'spitfire') {
   const guns = cockpitGuns(type);
   const theme = pitTheme(type);
   const pitMat = mat(theme.pit, 0.78, 0.08);
-  const dashMat = mat(theme.dash, 0.62, 0.18);
+  const pitBasic = new THREE.MeshBasicMaterial({ color: theme.pit });
   const seatMat = mat(theme.leather, 0.84, 0.04);
   const w = theme.width;
   const g = new THREE.Group();
   g.name = 'cockpit';
-  const floor = new THREE.Mesh(new THREE.BoxGeometry(w, 0.035, 0.95), pitMat);
-  floor.position.set(0, -0.2, 0.06);
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(w, 0.03, 0.9), pitMat);
+  floor.position.set(0, -0.22, 0.02);
   floor.receiveShadow = true;
   g.add(floor);
-  const bulk = new THREE.Mesh(new THREE.BoxGeometry(w, 0.42, 0.07), pitMat);
-  bulk.position.set(0, 0.02, 0.5);
+  const bulk = new THREE.Mesh(new THREE.BoxGeometry(w, 0.4, 0.06), pitMat);
+  bulk.position.set(0, 0.0, 0.64);
   g.add(bulk);
   for (const side of [-1, 1]) {
-    const wall = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.32, 0.9), pitMat);
-    wall.position.set(side * (w * 0.5), -0.02, 0.04);
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.34, 0.85), pitBasic);
+    wall.position.set(side * (w * 0.5), -0.04, 0.02);
     g.add(wall);
+    const console = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.12, 0.42), pitBasic);
+    console.position.set(side * (w * 0.38), -0.08, 0.04);
+    g.add(console);
   }
-  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.06, 0.28), seatMat);
-  seat.position.set(0, -0.14, 0.22);
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.05, 0.26), seatMat);
+  seat.position.set(0, -0.16, 0.32);
   g.add(seat);
-  const dash = new THREE.Mesh(new THREE.BoxGeometry(w - 0.06, type === 'bf109' ? 0.24 : 0.2, type === 'stuka' ? 0.44 : 0.38), dashMat);
-  dash.position.set(0, type === 'bf109' ? 0.04 : 0.0, -0.26);
-  dash.rotation.x = type === 'mustang' ? -0.38 : -0.46;
-  dash.receiveShadow = true;
-  g.add(dash);
+
+  const coaming = { y: 0.08, z: -0.36 };
+  const pad = new THREE.Mesh(
+    new THREE.BoxGeometry(w * 0.9, 0.04, 0.1),
+    type === 'stuka' ? new THREE.MeshBasicMaterial({ color: theme.leather }) : pitBasic,
+  );
+  pad.position.set(0, coaming.y, coaming.z);
+  g.add(pad);
+
+  const panel = new THREE.Mesh(
+    new THREE.BoxGeometry(w * 0.86, 0.26, 0.04),
+    new THREE.MeshBasicMaterial({ map: panelTexture(type) }),
+  );
+  panel.position.set(0, -0.06, -0.3);
+  panel.rotation.x = -0.22;
+  g.add(panel);
+
   const needles = [];
-  const xs = type === 'bf109' ? [-0.28, -0.1, 0.1, 0.28] : [-0.42, -0.26, 0.26, 0.42].map((v) => v * (w / 0.94));
+  const xs = [-0.22, -0.08, 0.08, 0.22].map((v) => v * (w / 0.94));
   theme.gauges.forEach((label, i) => {
     const gauge = makeGauge(label);
-    gauge.position.set(xs[i], type === 'bf109' ? 0.14 : 0.1, -0.38);
-    gauge.rotation.x = -0.55;
-    gauge.scale.setScalar(type === 'hellcat' ? 1.28 : 1.18);
+    gauge.position.set(xs[i], 0.01, -0.33);
+    gauge.rotation.x = -0.24;
+    gauge.scale.setScalar(0.72);
     g.add(gauge);
     needles.push(gauge.userData.needle);
   });
-  if (type === 'mustang' || type === 'hellcat') {
-    ['OIL', 'TEMP'].forEach((label, i) => {
-      const extra = makeGauge(label);
-      extra.position.set([-0.12, 0.12][i], 0.02, -0.34);
-      extra.rotation.x = -0.5;
-      extra.scale.setScalar(0.82);
-      g.add(extra);
-      needles.push(extra.userData.needle);
-    });
-  }
   g.userData.needles = needles;
+
   const stick = makeStick(theme.stick);
+  stick.position.set(0, -0.2, 0.16);
+  stick.rotation.x = 0.28;
   g.add(stick);
   g.userData.stick = stick;
-  const bar = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.02, 0.03), mats.metal);
-  bar.position.set(0, -0.16, -0.06);
+  const bar = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.016, 0.024), mats.metal);
+  bar.position.set(0, -0.18, -0.04);
   g.add(bar);
   for (const side of [-1, 1]) {
     const pedal = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.012, 0.12), mats.darkMetal);
-    pedal.position.set(side * 0.16, -0.15, -0.12);
+    pedal.position.set(side * 0.15, -0.18, -0.14);
     g.add(pedal);
   }
-  const throttle = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.018, 0.16, 8), type === 'stuka' ? mat(0xc4a24a) : mats.darkMetal);
-  throttle.position.set(-w * 0.38, 0.02, -0.02);
-  throttle.rotation.z = 0.4;
+  const throttle = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.012, 0.018, 0.14, 8),
+    type === 'stuka' ? new THREE.MeshBasicMaterial({ color: 0xc4a24a }) : mats.darkMetal,
+  );
+  throttle.position.set(-w * 0.36, -0.02, -0.08);
+  throttle.rotation.z = 0.45;
   g.add(throttle);
   if (type === 'bf109') {
-    const cannon = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.05, 0.55, 10), mats.darkMetal);
+    const cannon = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.048, 0.42, 10), mats.darkMetal);
     cannon.rotation.x = Math.PI / 2;
-    cannon.position.set(0, -0.08, -0.05);
+    cannon.position.set(0, -0.14, -0.02);
     g.add(cannon);
   }
   if (type === 'stuka') {
-    const dive = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.16, 0.04), mat(0xc4a24a));
-    dive.position.set(0.32, 0.02, 0.08);
+    const dive = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.14, 0.03), new THREE.MeshBasicMaterial({ color: 0xc4a24a }));
+    dive.position.set(w * 0.34, -0.02, -0.06);
     g.add(dive);
+    const stuvi = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.018, 0.06, 10), new THREE.MeshBasicMaterial({ color: 0x1c2024 }));
+    stuvi.position.set(0, -0.02, -0.28);
+    stuvi.rotation.x = 0.85;
+    g.add(stuvi);
   }
   if (type === 'spitfire') {
-    const compass = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.04, 16), mats.brass);
-    compass.position.set(0, -0.12, -0.18);
+    const compass = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.03, 16), mats.brass);
+    compass.position.set(0, -0.16, -0.18);
     g.add(compass);
   }
-  addGunsight(g, theme.sight || sightFor(type), COCKPIT_SIGHT);
+  addWindscreen(g, type, w, theme.pit);
+  addGunsight(g, theme.sight || sightFor(type), coaming);
   g.visible = false;
   g.userData.guns = guns;
   g.userData.theme = theme;

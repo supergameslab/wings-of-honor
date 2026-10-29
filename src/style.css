@@ -144,7 +144,7 @@ display:flex;flex-direction:column;min-height:0;padding:14px 14px 16px}
 .hangar-card.selected{border-color:var(--gold);background:#d6b36e18}
 .hangar-card.locked{opacity:.45}
 .hangar-card-wrap{width:min(760px,92vw);max-height:90vh;overflow:auto}
-.hangar-thumb{width:100%;height:96px;object-fit:cover;background:#101920;border:1px solid #ffffff14}
+.hangar-thumb{width:100%;height:118px;object-fit:cover;background:#8a96a2;border:1px solid #ffffff14}
 .hangar-stats{display:flex;flex-direction:column;gap:2px;width:100%;margin:2px 0 4px}
 .hangar-stat{display:flex;align-items:center;gap:8px;width:100%}
 .hangar-stat em{flex:0 0 42px;font-style:normal;font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
