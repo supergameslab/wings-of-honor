@@ -236,6 +236,23 @@ export function drawVintageStaffMap(ctx, w, h, opts) {
   const bounds = 320;
   const toX = (x) => w / 2 + (x / bounds) * (w * 0.42);
   const toY = (z) => h / 2 + (z / bounds) * (h * 0.38);
+  const field = opts.homeField;
+  if (field) {
+    const sx = toX(field.stripX ?? field.x);
+    const sy = toY(field.stripZ ?? field.z);
+    ctx.save();
+    ctx.translate(sx, sy);
+    ctx.fillStyle = 'rgba(176, 132, 48, 0.35)';
+    ctx.strokeStyle = '#8a6a28';
+    ctx.lineWidth = 1.4;
+    ctx.fillRect(-7, -22, 14, 44);
+    ctx.strokeRect(-7, -22, 14, 44);
+    ctx.fillStyle = '#6b2a1e';
+    ctx.font = '9px Georgia, serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('HOME', 0, -26);
+    ctx.restore();
+  }
   const player = opts.player;
   if (player) {
     const px = toX(player.position.x);

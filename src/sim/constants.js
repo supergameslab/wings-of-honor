@@ -65,10 +65,15 @@ export const WIND = {
 export const FUEL = {
   BURN_PER_S: 1 / 100,
   SPUTTER: 0.14,
-  STRIP_HALF_W: 18,
-  STRIP_HALF_L: 88,
-  LAND_AGL: 18,
-  LAND_ALIGN: 0.52,
+  LOW: 0.32,
+  STRIP_HALF_W: 20,
+  STRIP_HALF_L: 96,
+  STRIP_OFFSET_Z: -36,
+  LAND_AGL: 28,
+  LAND_ALIGN: 0.85,
+  TOUCH_AGL: 12,
+  TOUCH_ALIGN: 1.2,
+  APPROACH_R: 320,
 };
 
 export function windFor(weather) {

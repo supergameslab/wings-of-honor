@@ -37,6 +37,21 @@
       "migrations_dir": "migrations"
     }
   ],
+  "kv_namespaces": [
+    {
+      "binding": "LIMITS",
+      "id": "a6501088d947435a8893ecc9a01b7a41"
+    }
+  ],
+  "send_email": [
+    {
+      "name": "EMAIL",
+      "allowed_sender_addresses": ["we.care@supergameslab.com"]
+    }
+  ],
+  "services": [
+    { "binding": "PORTAL", "service": "supergameslab" }
+  ],
   "durable_objects": {
     "bindings": [
       {

@@ -81,7 +81,7 @@ export async function squadronOf(env, userId) {
 }
 
 export async function entitlementsOf(env, userId) {
-  return all(env, `SELECT sku, at FROM ${T.shopEntitlements} WHERE user_id = ?`, userId);
+  return all(env, `SELECT sku, at, expires_at FROM ${T.shopEntitlements} WHERE user_id = ? AND (expires_at IS NULL OR expires_at > ?)`, userId, Date.now());
 }
 
 export async function touchRecent(env, a, b) {

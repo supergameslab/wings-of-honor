@@ -5,6 +5,30 @@ import { track } from './telemetry.js';
 
 const $ = (id) => document.getElementById(id);
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+let turnstileId = null;
+
+async function mountTurnstile() {
+  const el = $('auth-turnstile');
+  if (!el || !window.turnstile || turnstileId != null) return;
+  const health = await api('/api/health');
+  const key = health.turnstileSiteKey || '';
+  if (!key) return;
+  turnstileId = window.turnstile.render(el, { sitekey: key });
+}
+
+function turnstileToken() {
+  if (turnstileId == null || !window.turnstile) return '';
+  return window.turnstile.getResponse(turnstileId) || '';
+}
+
 let hooks = {};
 let presenceTimer = null;
 let lastInviteTokens = new Set();
@@ -84,6 +108,7 @@ async function openAuth() {
     return;
   }
   hooks.setMode?.('auth');
+  mountTurnstile();
 }
 
 async function openMess() {
@@ -109,7 +134,7 @@ async function sendMagic() {
   const email = $('auth-email')?.value || '';
   const status = $('auth-status');
   status.textContent = 'Sending…';
-  const data = await requestMagic(email);
+  const data = await requestMagic(email, turnstileToken());
   if (data.error) {
     status.textContent = data.error;
     return;
@@ -175,7 +200,7 @@ async function fillRecent() {
   if (!box) return;
   const rows = data.recent || [];
   box.innerHTML = rows.length
-    ? rows.map((r) => `<button type="button" data-user="${r.username}">${r.username}</button>`).join('')
+        ? rows.map((r) => `<button type="button" data-user="${escapeHtml(r.username)}">${escapeHtml(r.username)}</button>`).join('')
     : '<small>No recent pilots yet.</small>';
   box.querySelectorAll('button').forEach((b) => {
     b.addEventListener('click', () => {
@@ -199,7 +224,7 @@ async function fillSquadron() {
   pane.querySelector('.sq-name').textContent = `${user.squadron.tag} · ${user.squadron.name}`;
   pane.querySelector('.sq-role').textContent = user.squadron.role;
   pane.querySelector('.sq-roster').innerHTML = (user.squadron.members || [])
-    .map((m) => `<li><b>${m.username}</b><small>${m.role}</small></li>`)
+    .map((m) => `<li><b>${escapeHtml(m.username)}</b><small>${escapeHtml(m.role)}</small></li>`)
     .join('');
 }
 
@@ -282,7 +307,7 @@ async function fillLogbook() {
     <p>Hunt wins ${w.hunt || 0} · Duel wins ${w.duel || 0}</p>
     <div class="ribbon-row">${(data.ribbons || []).map((r) => `<span>${r.ribbon.replace('_', ' ')}</span>`).join('') || '<small>No ribbons yet — go fly!</small>'}</div>
     <h3>This week</h3>
-    <ol>${(week.board || []).map((r) => `<li><b>${r.name}</b> ${r.tag || ''} <span>${r.kills}</span></li>`).join('') || '<li>No flights yet this week. Be the first!</li>'}</ol>
+    <ol>${(week.board || []).map((r) => `<li><b>${escapeHtml(r.name)}</b> ${escapeHtml(r.tag || '')} <span>${Number(r.kills) || 0}</span></li>`).join('') || '<li>No flights yet this week. Be the first!</li>'}</ol>
   `;
 }
 
@@ -302,8 +327,8 @@ async function fillShop() {
   const owned = new Set((data.owned || []).map((o) => o.sku));
   pane.innerHTML = (data.catalog || [])
     .map(
-      (s) => `<div class="shop-row"><div><b>${s.name}</b><small>${s.blurb || s.kind} · $${(s.price / 100).toFixed(2)}</small></div>
-      <button data-sku="${s.sku}" ${owned.has(s.sku) ? 'disabled' : ''}>${owned.has(s.sku) ? 'YOURS' : data.stripe ? 'GET' : 'TRY'}</button></div>`,
+      (s) => `<div class="shop-row"><div><b>${escapeHtml(s.name)}</b><small>${escapeHtml(s.blurb || s.kind)} · $${(s.price / 100).toFixed(2)}</small></div>
+      <button data-sku="${escapeHtml(s.sku)}" ${owned.has(s.sku) ? 'disabled' : ''}>${owned.has(s.sku) ? 'YOURS' : data.stripe ? 'GET' : 'TRY'}</button></div>`,
     )
     .join('');
 }
@@ -355,7 +380,7 @@ export function fillLobby(room, userId) {
   const box = $('lobby-roster');
   if (!box || !room) return;
   box.innerHTML = (room.pilots || [])
-    .map((p) => `<li class="team-${p.team}"><b>${p.tag ? p.tag + ' ' : ''}${p.username}</b><small>${p.ready ? 'READY' : 'WAIT'}${p.connected ? '' : ' · LINK LOST'}</small></li>`)
+    .map((p) => `<li class="team-${p.team}"><b>${escapeHtml(p.tag ? p.tag + ' ' : '')}${escapeHtml(p.username)}</b><small>${p.ready ? 'READY' : 'WAIT'}${p.connected ? '' : ' · LINK LOST'}</small></li>`)
     .join('');
   let meta = `${room.mode.toUpperCase()} · ${room.difficulty} · mission ${String(room.missionId).padStart(2, '0')}${room.ranked ? ' · RANKED' : ''}`;
   if (room.mode === 'hunt') {

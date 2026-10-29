@@ -1,24 +1,19 @@
 import { MatchRoom } from './room.js';
 import { ensureSchema, one, all, run, userById, userByEmail, userByUsername, squadronOf, entitlementsOf, touchRecent, shouldWrite } from './db.js';
 import { TABLES as T } from './tables.js';
-import { json, jsonHeaders, token, now, normalizeEmail, validEmail, normalizeUsername, validUsername, normalizeTag, cookie, readCookie, bearer, readBody, originOf, mpEnabled, PROTOCOL } from './util.js';
-import { sendMail, magicMail, inviteMail } from './mail.js';
+import { json, jsonHeaders, token, now, normalizeEmail, validEmail, normalizeUsername, validUsername, normalizeTag, cookie, readCookie, bearer, readBody, originOf, mpEnabled, PROTOCOL, isHttps } from './util.js';
+import { sendTemplate, magicMail, inviteMail } from './mail.js';
 import { ensureOps, flagsOf, ingestTelemetry, routeOps, mergeAndSaveProgress, bindIdent, wipeIdent, runOpsJobs, bumpCounter, clampSortie } from './ops.js';
+import { routeShop, paymentsMode, stripeSecret } from './shop.js';
+import { trySso, attachSgl, verifyTurnstileViaPortal, sglConfig } from './sso.js';
+import { localSeo, applyGameSeo } from './seo.js';
 
 export { MatchRoom };
 
 const SESSION_MS = 1000 * 60 * 60 * 24 * 30;
-const SHOP = [
-  { sku: 'founder', name: 'Founder pack', price: 900, kind: 'pack', blurb: 'Roundels, linen, smoke, title.' },
-  { sku: 'skin_olive', name: 'Olive linen', price: 300, kind: 'skin', skinId: 'olive' },
-  { sku: 'skin_sand', name: 'Desert linen', price: 300, kind: 'skin', skinId: 'sand' },
-  { sku: 'skin_night', name: 'Night linen', price: 300, kind: 'skin', skinId: 'night' },
-  { sku: 'charter', name: 'Squadron charter', price: 1200, kind: 'charter', blurb: 'Tag colour, roster 24, Duel archive.' },
-  { sku: 'season', name: 'Season pass', price: 800, kind: 'season', blurb: 'Cosmetics and ribbons only.' },
-];
 
-function sessionCookie(id, clear = false) {
-  return cookie('wings_session', clear ? '' : id, clear ? 0 : SESSION_MS / 1000);
+function sessionCookie(id, request, clear = false) {
+  return cookie('wings_session', clear ? '' : id, clear ? 0 : SESSION_MS / 1000, { secure: isHttps(request) });
 }
 
 async function currentUser(request, env) {
@@ -89,7 +84,7 @@ async function createSession(env, request, userId) {
   await run(env, `INSERT INTO ${T.authSessions} (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)`, sid, userId, now(), now() + SESSION_MS);
   return {
     token: sid,
-    headers: { 'set-cookie': sessionCookie(sid) },
+    headers: { 'set-cookie': sessionCookie(sid, request) },
   };
 }
 
@@ -112,6 +107,10 @@ function stripMount(pathname) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.hostname === 'www.supergameslab.com') {
+      url.hostname = 'supergameslab.com';
+      return Response.redirect(url.toString(), 301);
+    }
     const pathname = stripMount(url.pathname);
 
     if (pathname === '/join' || pathname === '/join/' || pathname === '/wings' || pathname === '/wings/') {
@@ -129,7 +128,19 @@ export default {
         await ensureOps(env);
         const routed = new URL(url.toString());
         routed.pathname = pathname;
-        return await route(request, env, routed);
+        const sso = await trySso(request, env, sessionCookie);
+        if (sso?.cookie) {
+          const headers = new Headers(request.headers);
+          headers.set('Cookie', `${headers.get('Cookie') || ''}; wings_session=${sso.sid}`);
+          request = new Request(request, { headers });
+        }
+        const res = await route(request, env, routed);
+        if (sso?.cookie) {
+          const h = new Headers(res.headers);
+          h.append('Set-Cookie', sso.cookie);
+          return new Response(res.body, { status: res.status, headers: h });
+        }
+        return res;
       } catch (err) {
         console.error(err);
         return json(request, { error: 'server error' }, 500);
@@ -138,7 +149,13 @@ export default {
 
     if (url.pathname.startsWith(MOUNT) && env.ASSETS) {
       const dest = new URL(pathname + url.search, url.origin);
-      return env.ASSETS.fetch(new Request(dest, request));
+      const res = await env.ASSETS.fetch(new Request(dest, request));
+      try {
+        await ensureSchema(env);
+        return applyGameSeo(res, await localSeo(env));
+      } catch {
+        return res;
+      }
     }
 
     return new Response(null, { status: 404 });
@@ -161,11 +178,12 @@ async function route(request, env, url) {
       runtime: 'cloudflare-worker',
       protocol: PROTOCOL,
       mp: mpEnabled(env) && flags.mp_enabled !== '0' && Boolean(env.MATCH_ROOM && env.DB),
-      shop: flags.shop_enabled !== '0' && Boolean(env.STRIPE_SECRET),
+      shop: paymentsMode(env, flags) !== 'off' && Boolean(stripeSecret(env, paymentsMode(env, flags))),
       telemetry: flags.telemetry_enabled !== '0',
       persistent: Boolean(env.DB),
       support: env.SUPPORT_MAIL || '',
       flags,
+      turnstileSiteKey: (await sglConfig(env)).turnstileSiteKey || '',
     });
   }
 
@@ -234,13 +252,15 @@ async function route(request, env, url) {
     const ip = request.headers.get('CF-Connecting-IP') || 'local';
     if (!(await rate(env, `magic:${email}`, 5, 3600000))) return json(request, { error: 'that is a lot of mail — try again later' }, 429);
     if (!(await rate(env, `magicip:${ip}`, 20, 86400000))) return json(request, { error: 'that is a lot of mail — try again later' }, 429);
+    const ts = await verifyTurnstileViaPortal(env, request, body.turnstile);
+    if (ts) return ts;
     const tok = token(18);
     await run(env, `INSERT INTO ${T.authMagicLinks} (token, email, created_at, expires_at, used) VALUES (?, ?, ?, ?, 0)`, tok, email, now(), now() + 15 * 60 * 1000);
     const mail = magicMail(originOf(request), tok);
-    const sent = await sendMail(env, { to: email, ...mail });
+    const sent = await sendTemplate(env, 'magic', email, { link: `${originOf(request)}${MOUNT}/?token=${tok}` }, mail);
     if (!sent.ok) await bumpCounter(env, 'mail_fail');
     const payload = { ok: true };
-    if (!env.RESEND_API_KEY) payload.devToken = tok;
+    if (sent.skipped) payload.devToken = tok;
     return json(request, payload);
   }
 
@@ -266,13 +286,16 @@ async function route(request, env, url) {
     const sess = await createSession(env, request, user.id);
     const aid = String(body.aid || '');
     if (aid) await bindIdent(env, aid, user.id);
-    return json(request, { ok: true, token: sess.token, user: await mePayload(env, user), invite: invite?.token || null }, 200, sess.headers);
+    await attachSgl(env, user.email, user.id, user.age_ok);
+    const out = { ok: true, user: await mePayload(env, user), invite: invite?.token || null };
+    if (body.native) out.token = sess.token;
+    return json(request, out, 200, sess.headers);
   }
 
   if (path === '/api/auth/logout' && method === 'POST') {
     const sid = bearer(request) || readCookie(request, 'wings_session');
     if (sid) await run(env, `DELETE FROM ${T.authSessions} WHERE id = ?`, sid);
-    return json(request, { ok: true }, 200, { 'set-cookie': sessionCookie('', true) });
+    return json(request, { ok: true }, 200, { 'set-cookie': sessionCookie('', request, true) });
   }
 
   if (path === '/api/me' && method === 'GET') {
@@ -324,7 +347,7 @@ async function route(request, env, url) {
     await run(env, `UPDATE ${T.matchPilots} SET callsign = 'deleted' WHERE user_id = ?`, user.id);
     await run(env, `UPDATE ${T.progressSorties} SET callsign = 'deleted' WHERE user_id = ?`, user.id);
     await wipeIdent(env, user.id);
-    return json(request, { ok: true }, 200, { 'set-cookie': sessionCookie('', true) });
+    return json(request, { ok: true }, 200, { 'set-cookie': sessionCookie('', request, true) });
   }
 
   if (path === '/api/presence' && method === 'POST') {
@@ -729,73 +752,8 @@ async function route(request, env, url) {
     return json(request, { week: start, board: rows });
   }
 
-  if (path === '/api/shop' && method === 'GET') {
-    const user = await currentUser(request, env);
-    const owned = user ? await entitlementsOf(env, user.id) : [];
-    const flags = await flagsOf(env);
-    const stripeOn = Boolean(env.STRIPE_SECRET) && flags.shop_enabled !== '0';
-    return json(request, { catalog: SHOP.filter((s) => s.sku !== 'season'), owned, stripe: stripeOn, native: false, devGrant: !stripeOn && env.MP_DEV !== '0' });
-  }
-
-  if (path === '/api/shop/checkout' && method === 'POST') {
-    const { user, error } = await requireUser(request, env);
-    if (error) return error;
-    const body = await readBody(request);
-    const item = SHOP.find((s) => s.sku === body.sku);
-    if (!item) return json(request, { error: 'unknown sku' }, 400);
-    if (!env.STRIPE_SECRET) {
-      if (env.MP_DEV === '0') return json(request, { error: 'the paint shop is not open yet' }, 503);
-      await run(env, `INSERT OR IGNORE INTO ${T.shopEntitlements} (user_id, sku, at) VALUES (?, ?, ?)`, user.id, item.sku, now());
-      if (item.sku === 'charter') {
-        const sq = await squadronOf(env, user.id);
-        if (sq && sq.role === 'owner') await run(env, `UPDATE ${T.socialSquadrons} SET roster_cap = 24 WHERE id = ?`, sq.id);
-      }
-      return json(request, { ok: true, granted: item.sku, dev: true });
-    }
-    const session = await fetch('https://api.stripe.com/v1/checkout/sessions', {
-      method: 'POST',
-      headers: { authorization: `Bearer ${env.STRIPE_SECRET}`, 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        mode: 'payment',
-        success_url: `${originOf(request)}${MOUNT}/?shop=ok`,
-        cancel_url: `${originOf(request)}${MOUNT}/?shop=cancel`,
-        client_reference_id: user.id,
-        'line_items[0][price_data][currency]': 'usd',
-        'line_items[0][price_data][product_data][name]': item.name,
-        'line_items[0][price_data][unit_amount]': String(item.price),
-        'line_items[0][quantity]': '1',
-        'metadata[sku]': item.sku,
-        'metadata[user]': user.id,
-      }),
-    });
-    const data = await session.json();
-    return json(request, { url: data.url, id: data.id });
-  }
-
-  if (path === '/api/shop/webhook' && method === 'POST') {
-    const raw = await request.text();
-    if (env.STRIPE_WEBHOOK_SECRET) {
-      const sig = request.headers.get('Stripe-Signature') || '';
-      const parts = Object.fromEntries(sig.split(',').map((p) => p.split('=')));
-      const signed = `${parts.t}.${raw}`;
-      const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(env.STRIPE_WEBHOOK_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-      const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(signed));
-      const hex = [...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, '0')).join('');
-      if (hex !== parts.v1) return json(request, { error: 'bad signature' }, 400);
-    } else if (env.MP_DEV === '0') {
-      return json(request, { error: 'webhook secret missing' }, 503);
-    }
-    let body = {};
-    try {
-      body = JSON.parse(raw);
-    } catch {
-      return json(request, { error: 'bad json' }, 400);
-    }
-    const sku = body?.data?.object?.metadata?.sku;
-    const userId = body?.data?.object?.metadata?.user || body?.data?.object?.client_reference_id;
-    if (sku && userId) await run(env, `INSERT OR IGNORE INTO ${T.shopEntitlements} (user_id, sku, at) VALUES (?, ?, ?)`, userId, sku, now());
-    return json(request, { ok: true });
-  }
+  const shop = await routeShop(request, env, url, { currentUser, requireUser });
+  if (shop) return shop;
 
   return json(request, { error: 'not found' }, 404);
 }
@@ -837,10 +795,10 @@ async function inviteSomeone(request, env, user, body, { kind, payload }) {
   );
   await run(env, `INSERT INTO ${T.authMagicLinks} (token, email, created_at, expires_at, used) VALUES (?, ?, ?, ?, 0)`, tok, email, now(), now() + 7 * 86400000);
   const mail = inviteMail(originOf(request), tok, user.username || 'A pilot', kind);
-  const sent = await sendMail(env, { to: email, ...mail });
+  const sent = await sendTemplate(env, 'invite', email, { link: `${originOf(request)}${MOUNT}/?token=${tok}`, fromName: user.username || 'A pilot' }, mail);
   if (!sent.ok) await bumpCounter(env, 'mail_fail');
   if (toUser) await touchRecent(env, user.id, toUser.id);
   const out = { ok: true, token: tok };
-  if (!env.RESEND_API_KEY) out.devToken = tok;
+  if (sent.skipped) out.devToken = tok;
   return json(request, out);
 }

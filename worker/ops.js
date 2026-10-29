@@ -1,12 +1,12 @@
 import { TABLES as T, COLS } from './tables.js';
 import { all, one, run, changedSince, shouldWrite } from './db.js';
-import { json, cookie, readCookie, readBody, now } from './util.js';
+import { json, cookie, readCookie, readBody, now, isHttps } from './util.js';
 import { sortieKind, clampSortie, mergeProgress } from '../src/sim/progress.js';
 
-const OPS_COOKIE = 'ops_session';
+const OPS_COOKIE = 'ops_wings';
 const FLAGS_TTL_MS = 45_000;
 const CLEAN_BATCH = 200;
-const defaultFlags = { mp_enabled: '1', shop_enabled: '1', telemetry_enabled: '1' };
+const defaultFlags = { mp_enabled: '1', shop_enabled: '1', telemetry_enabled: '1', payments_mode: 'off' };
 
 let flagsCache = { at: 0, value: null };
 
@@ -36,8 +36,8 @@ function dayStart(ts = now()) {
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 }
 
-function opsCookie(value, clear = false) {
-  return cookie(OPS_COOKIE, clear ? '' : value, clear ? 0 : 7 * 86400);
+function opsCookie(value, request, clear = false) {
+  return cookie(OPS_COOKIE, clear ? '' : value, clear ? 0 : 7 * 86400, { secure: isHttps(request) });
 }
 
 async function secretHash(secret) {
@@ -334,11 +334,11 @@ export async function routeOps(request, env, url) {
     if (!env.ADMIN_SECRET || body.secret !== env.ADMIN_SECRET) return json(request, { error: 'denied' }, 401);
     const tok = await secretHash(env.ADMIN_SECRET);
     await audit(env, 'login', 'ops');
-    return json(request, { ok: true }, 200, { 'set-cookie': opsCookie(tok) });
+    return json(request, { ok: true }, 200, { 'set-cookie': opsCookie(tok, request) });
   }
 
   if (path === '/api/ops/logout' && method === 'POST') {
-    return json(request, { ok: true }, 200, { 'set-cookie': opsCookie('', true) });
+    return json(request, { ok: true }, 200, { 'set-cookie': opsCookie('', request, true) });
   }
 
   const gate = await requireOps(request, env);

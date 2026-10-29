@@ -68,9 +68,38 @@ export function normalizeTag(value) {
     .slice(0, 4);
 }
 
-export function cookie(name, value, maxAge) {
-  const parts = [`${name}=${value}`, 'Path=/', 'HttpOnly', 'SameSite=Lax', `Max-Age=${maxAge}`];
+export function isHttps(request) {
+  return new URL(request.url).protocol === 'https:';
+}
+
+export function cookie(name, value, maxAge, opts = {}) {
+  const parts = [`${name}=${value}`, `Path=${opts.path || '/'}`, 'HttpOnly', `SameSite=${opts.sameSite || 'Lax'}`, `Max-Age=${maxAge}`];
+  if (opts.secure) parts.push('Secure');
   return parts.join('; ');
+}
+
+export function timingSafeEqual(a, b) {
+  const x = String(a || '');
+  const y = String(b || '');
+  if (x.length !== y.length) return false;
+  let out = 0;
+  for (let i = 0; i < x.length; i += 1) out |= x.charCodeAt(i) ^ y.charCodeAt(i);
+  return out === 0;
+}
+
+export function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+export function fillTemplate(str, vars, html = false) {
+  return String(str || '').replace(/\{\{(\w+)\}\}/g, (_, k) => {
+    const v = String(vars[k] ?? '');
+    return html ? escapeHtml(v) : v;
+  });
 }
 
 export function readCookie(request, name) {

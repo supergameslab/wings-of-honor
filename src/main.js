@@ -25,7 +25,7 @@ import {
   usesFuel,
 } from './campaign.js';
 import { createWorld } from './world.js';
-import { FLIGHT, COMBAT, FUEL, clamp, damp, analogStick, integrateFlight, updateAi, createCraft, createAiCraft, forwardFromEuler, segmentHitsSphere, spawnBomb, stepBomb, predictLanding, predictBombImpact, bombHitsTarget, groundSpec, isStrafeable, isConvoy, stepConvoy, aaFireDir, aceById, acesFor, killScore, planeById, planeRatings, enemyCraftFor } from './sim/index.js';
+import { FLIGHT, COMBAT, FUEL, clamp, damp, analogStick, integrateFlight, updateAi, createCraft, createAiCraft, forwardFromEuler, segmentHitsSphere, spawnBomb, stepBomb, predictLanding, predictBombImpact, bombHitsTarget, groundSpec, isStrafeable, isConvoy, stepConvoy, aaFireDir, aceById, acesFor, killScore, planeById, planeRatings, enemyCraftFor, stripOffset, homeNav, homeStripCenter, canCommitLand, shouldAutoLand, landRejectReason, stepLandMeter, landingCue, linedUp } from './sim/index.js';
 import { drawVintageStaffMap, drawBriefingPhoto } from './briefingArt.js';
 import { makeAircraft, CRAFTS, craftById, isCraftUnlocked } from './craft.js';
 import { getSession, bootAuth, api as authApi } from './auth.js';
@@ -60,6 +60,10 @@ const ui = {
   landBtn: $('land-btn'),
   takeoffBtn: $('takeoff-btn'),
   landPrompt: $('land-prompt'),
+  homeCompass: $('home-compass'),
+  homeNeedle: $('home-needle'),
+  homeRange: $('home-range'),
+  radarLegend: $('radar-legend'),
   target: $('target-label'),
   targetMark: $('target-mark'),
   bombsight: $('bombsight'),
@@ -358,14 +362,26 @@ function attachBombBeacon(g) {
 
 function makeHomeField(x, z) {
   const g = new THREE.Group();
+  const stripZ = z + (FUEL.STRIP_OFFSET_Z ?? -36);
   const gy = world.heightAt(x, z);
-  const strip = new THREE.Mesh(new THREE.BoxGeometry(24, 0.2, 168), mat(0x6d7c4a, 0.95, 0.04));
-  strip.position.set(x, gy + 0.08, z - 36);
+  const stripGy = world.heightAt(x, stripZ);
+  const halfW = FUEL.STRIP_HALF_W;
+  const halfL = FUEL.STRIP_HALF_L;
+  const apron = new THREE.Mesh(new THREE.BoxGeometry(halfW * 2 + 6, 0.16, halfL * 2 + 4), mat(0xc9b36a, 0.88, 0.04));
+  apron.position.set(x, stripGy + 0.04, stripZ);
+  g.add(apron);
+  const strip = new THREE.Mesh(new THREE.BoxGeometry(halfW * 2 - 4, 0.24, halfL * 2 - 6), mat(0x6f6d60, 0.94, 0.05));
+  strip.position.set(x, stripGy + 0.1, stripZ);
   strip.receiveShadow = true;
   g.add(strip);
-  const chalk = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.22, 150), mat(0xe8e2d0, 0.9, 0.05));
-  chalk.position.set(x, gy + 0.16, z - 36);
+  const chalk = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.28, halfL * 2 - 18), mat(0xf4efe2, 0.92, 0.05));
+  chalk.position.set(x, stripGy + 0.22, stripZ);
   g.add(chalk);
+  for (const end of [-1, 1]) {
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(halfW * 1.4, 0.3, 3.2), mat(0xf4efe2, 0.9, 0.05));
+    bar.position.set(x, stripGy + 0.24, stripZ + end * (halfL - 10));
+    g.add(bar);
+  }
   for (const side of [-1, 1]) {
     const shed = new THREE.Mesh(new THREE.BoxGeometry(16, 6.2, 12), mat(0x8a7a58, 0.84, 0.08));
     shed.position.set(x + side * 22, gy + 3.1, z + 28);
@@ -382,32 +398,36 @@ function makeHomeField(x, z) {
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 6.5, 6), mat(0x3a3228));
   pole.position.set(x + 8.4, gy + 3.2, z + 8);
   g.add(pole);
+  const beacon = new THREE.Mesh(
+    new THREE.TorusGeometry(11, 0.32, 8, 22),
+    new THREE.MeshBasicMaterial({ color: 0xf0c45a, transparent: true, opacity: 0.72, depthWrite: false }),
+  );
+  beacon.rotation.x = Math.PI / 2;
+  beacon.position.set(x, stripGy + 18, stripZ);
+  g.add(beacon);
+  g.userData.beacon = beacon;
   scene.add(g);
-  return { x, z, heading: 0, group: g };
-}
-
-function headingDiff(a, b) {
-  let d = a - b;
-  while (d > Math.PI) d -= Math.PI * 2;
-  while (d < -Math.PI) d += Math.PI * 2;
-  return Math.abs(d);
+  return { x, z, stripX: x, stripZ, heading: 0, halfW, halfL, group: g };
 }
 
 function overStrip() {
   if (!homeField || !player) return null;
-  const side = player.position.x - homeField.x;
-  const along = -(player.position.z - homeField.z);
-  const agl = player.position.y - world.heightAt(player.position.x, player.position.z);
-  const align = Math.min(headingDiff(flight.heading, 0), headingDiff(flight.heading, Math.PI));
-  return { side, along, agl, align };
+  return stripOffset(
+    player.position.x,
+    player.position.z,
+    player.position.y,
+    flight.heading,
+    homeField,
+    (x, z) => world.heightAt(x, z),
+  );
 }
 
-function tryLand() {
-  if (!fuelJob || flight.grounded) return;
+function tryLand(opts = {}) {
+  if (!fuelJob || flight.grounded) return false;
   const o = overStrip();
-  if (!o || Math.abs(o.side) > FUEL.STRIP_HALF_W || Math.abs(o.along) > FUEL.STRIP_HALF_L || o.agl > FUEL.LAND_AGL || o.align > FUEL.LAND_ALIGN || landMeter < 0.45) {
-    notify('LINE UP WITH THE STRIP');
-    return;
+  if (!canCommitLand(o, landMeter, Boolean(opts.forced || opts.auto))) {
+    notify(landRejectReason(o));
+    return false;
   }
   flight.grounded = true;
   flight.pitch = 0;
@@ -417,12 +437,14 @@ function tryLand() {
   sputtered = false;
   landMeter = 0;
   if (bombingMission(currentMission)) {
-    bombsLeft = COMBAT.BOMB_LOAD;
+    bombsLeft = playerPlane.bombLoad || COMBAT.BOMB_LOAD;
     if (ui.bombs) ui.bombs.textContent = String(bombsLeft);
   }
   player.position.y = world.heightAt(player.position.x, player.position.z) + FLIGHT.GROUND_CLEARANCE;
   applyFlightPose();
-  notify('TANKS FULL');
+  notify(victoryAt ? 'DOWN · SORTIE COMPLETE' : 'DOWN · TANKS FULL · T TO GO');
+  if (victoryAt) maybeWin();
+  return true;
 }
 
 function tryTakeoff() {
@@ -437,35 +459,72 @@ function tryTakeoff() {
   notify('UP YOU GO');
 }
 
+function setLandPrompt(cue) {
+  if (!ui.landPrompt) return;
+  if (!cue?.show) {
+    ui.landPrompt.classList.add('hidden');
+    ui.landPrompt.replaceChildren();
+    return;
+  }
+  const main = document.createElement('strong');
+  main.textContent = cue.prompt;
+  const sub = document.createElement('small');
+  sub.textContent = cue.sub || '';
+  ui.landPrompt.replaceChildren(main, sub);
+  ui.landPrompt.classList.remove('hidden');
+}
+
+function hideHomeAids() {
+  ui.landPrompt?.classList.add('hidden');
+  ui.homeCompass?.classList.add('hidden');
+  if (ui.radarLegend) ui.radarLegend.textContent = 'RADAR';
+}
+
 function updateHomePrompt(dt) {
   const show = fuelJob && mode === 'playing';
   ui.fuelStat?.classList.toggle('hidden', !show);
   ui.landBtn?.classList.toggle('hidden', !show || flight.grounded);
   ui.takeoffBtn?.classList.toggle('hidden', !show || !flight.grounded);
+  if (ui.radarLegend) ui.radarLegend.textContent = show ? 'RADAR · GOLD STRIP' : 'RADAR';
   if (!show) {
-    ui.landPrompt?.classList.add('hidden');
+    hideHomeAids();
     return;
   }
   if (ui.fuel) {
     ui.fuel.style.width = `${Math.round(fuel * 100)}%`;
-    ui.fuel.style.background = fuel < 0.22 ? '#b94738' : '#d9ae61';
+    ui.fuel.style.background = fuel < FUEL.LOW ? '#b94738' : '#d9ae61';
   }
-  if (flight.grounded) {
-    const rotate = playerPlane.handling?.rotateAt || 38;
-    const ready = airspeed >= rotate * 0.82;
-    landMeter = 0;
-    ui.landPrompt?.classList.toggle('hidden', !ready);
-    if (ready && ui.landPrompt) ui.landPrompt.textContent = 'TAKE OFF · T';
-    ui.takeoffBtn?.classList.toggle('ready', ready);
-    return;
+  const nav = homeField && player ? homeNav(player.position.x, player.position.z, flight.heading, homeField) : null;
+  if (flight.grounded) landMeter = 0;
+  else {
+    const o = overStrip();
+    landMeter = stepLandMeter(landMeter, linedUp(o), dt);
+    if (shouldAutoLand(o, landMeter)) tryLand({ auto: true });
   }
-  const o = overStrip();
-  const lined = o && Math.abs(o.side) < FUEL.STRIP_HALF_W && Math.abs(o.along) < FUEL.STRIP_HALF_L && o.agl < FUEL.LAND_AGL && o.align < FUEL.LAND_ALIGN;
-  landMeter = lined ? Math.min(1, landMeter + dt / 1.55) : Math.max(0, landMeter - dt * 0.9);
-  const step = landMeter >= 0.98 ? 'NOW' : landMeter >= 0.66 ? '1' : landMeter >= 0.33 ? '2' : landMeter > 0.08 ? '3' : '';
-  ui.landPrompt?.classList.toggle('hidden', !step);
-  if (step && ui.landPrompt) ui.landPrompt.textContent = step === 'NOW' ? 'LAND · L' : `LINE UP · ${step}`;
-  ui.landBtn?.classList.toggle('ready', landMeter >= 0.5);
+  const cue = landingCue({
+    grounded: flight.grounded,
+    airspeed,
+    rotateAt: playerPlane.handling?.rotateAt || 38,
+    offset: overStrip(),
+    meter: landMeter,
+    fuel,
+    jobDone: Boolean(victoryAt),
+    nav,
+  });
+  setLandPrompt(cue);
+  ui.landBtn?.classList.toggle('ready', cue.landReady);
+  ui.takeoffBtn?.classList.toggle('ready', cue.takeoffReady);
+  const showCompass = Boolean(cue.showCompass && nav);
+  ui.homeCompass?.classList.toggle('hidden', !showCompass);
+  ui.homeCompass?.classList.toggle('low', fuel <= FUEL.LOW || Boolean(victoryAt));
+  if (showCompass && ui.homeNeedle) ui.homeNeedle.style.transform = `rotate(${nav.rel * (180 / Math.PI)}deg)`;
+  if (showCompass && ui.homeRange) ui.homeRange.textContent = `${Math.round(nav.dist)} · HOME`;
+  const beacon = homeField?.group?.userData?.beacon;
+  if (beacon?.material) {
+    beacon.material.opacity = 0.42 + Math.sin(elapsed * 6) * 0.28;
+    const pulse = fuel <= FUEL.LOW || victoryAt ? 1.12 + Math.sin(elapsed * 7) * 0.1 : 1;
+    beacon.scale.setScalar(pulse);
+  }
 }
 
 function makeWaypoint(x, y, z) {
@@ -1015,7 +1074,7 @@ function fillBriefing(mission) {
     if (ace) secondary.unshift(`<li><i class="pip enemy"></i>Ace reported: <b>${ace.name}</b> — ${ace.callsign}</li>`);
   });
   if (usesFuel(mission, mission.onboard ? 'easy' : progress.difficulty)) {
-    secondary.push('<li><i class="pip hull"></i>Watch the fuel needle. Land by the sheds to fill up.</li>');
+    secondary.push('<li><i class="pip hull"></i>Watch the fuel needle. Follow the compass to the gold strip, then press L or settle onto the grass.</li>');
   }
   secondary.push('<li><i class="pip hull"></i>Minimize damage to your aircraft</li>');
   const primaryEl = $('brief-primary');
@@ -1132,7 +1191,7 @@ function resetGame() {
   $('fuel-stat')?.classList.toggle('hidden', !fuelJob);
   ui.landBtn?.classList.toggle('hidden', true);
   ui.takeoffBtn?.classList.toggle('hidden', !fuelJob);
-  ui.landPrompt?.classList.add('hidden');
+  hideHomeAids();
   ui.bombsight?.classList.add('hidden');
   if (bombSightRig) bombSightRig.visible = false;
   ui.score.textContent = '000000';
@@ -1146,7 +1205,7 @@ function resetGame() {
   if (hint) {
     const ground = currentMission.targetKind;
     hint.textContent = fuelJob
-      ? 'FIRE TAXI · T TAKE OFF · L LAND · SPACE FIRE'
+      ? 'FIRE TAXI · T TAKE OFF · FOLLOW COMPASS HOME · L LAND ON THE GOLD STRIP'
       : ground === 'trench' || ground === 'troops' || ground === 'truck' || ground === 'aa'
         ? '↓ DIVE · SPACE STRAFE · B BOMB · C COCKPIT'
         : bombingMission(currentMission)
@@ -1180,7 +1239,7 @@ function setMode(next) {
   if (next !== 'playing' && next !== 'mp') {
     ui.targetMark?.classList.add('hidden');
     ui.bombsight?.classList.add('hidden');
-    ui.landPrompt?.classList.add('hidden');
+    hideHomeAids();
     if (bombSightRig) bombSightRig.visible = false;
   }
   if (soundLive()) startEngine();
@@ -1769,7 +1828,7 @@ function setupStick() {
   });
   ui.landBtn?.addEventListener('click', (e) => {
     e.preventDefault();
-    tryLand();
+    tryLand({ forced: true });
   });
   ui.takeoffBtn?.addEventListener('click', (e) => {
     e.preventDefault();
@@ -1797,7 +1856,7 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
   }
   if ((e.code === 'KeyB' || e.key.toLowerCase() === 'b') && mode === 'playing') createBomb();
-  if ((e.code === 'KeyL' || e.key.toLowerCase() === 'l') && mode === 'playing') tryLand();
+  if ((e.code === 'KeyL' || e.key.toLowerCase() === 'l') && mode === 'playing') tryLand({ forced: true });
   if ((e.code === 'KeyT' || e.key.toLowerCase() === 't') && mode === 'playing') tryTakeoff();
   if ((e.code === 'KeyC' || e.key.toLowerCase() === 'c') && (mode === 'playing' || mode === 'mp')) setView();
   if (e.code === 'Escape' || e.key === 'Escape') {
@@ -2099,14 +2158,6 @@ function drawRadarBlip(ctx, px, py, kind, size) {
     ctx.rotate(Math.PI / 4);
     ctx.fillRect(-size, -size, size * 2, size * 2);
     ctx.restore();
-  } else if (kind === 'home') {
-    ctx.fillStyle = '#f0c45a';
-    ctx.beginPath();
-    ctx.arc(px, py, size + 1.5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#e9e2d1';
-    ctx.lineWidth = 1.4;
-    ctx.stroke();
   } else {
     ctx.fillStyle = '#e9e2d1';
     ctx.moveTo(px, py - size - 1);
@@ -2185,8 +2236,75 @@ function drawRadar() {
   for (const wp of waypoints) {
     if (!wp.hit) plot(wp.x, wp.z, 'mark');
   }
-  if (homeField) plot(homeField.x, homeField.z, 'home');
+  drawRadarHome(ctx, cx, cy, radius);
   drawRadarBlip(ctx, cx, cy, 'you', 5);
+}
+
+function radarPoint(x, z, radius, cx, cy) {
+  const rel = worldToRadar(x - player.position.x, z - player.position.z, flight.heading);
+  let rx = rel.x;
+  let ry = rel.y;
+  const dist = Math.hypot(rx, ry);
+  const clamped = dist > RADAR_RANGE;
+  if (clamped) {
+    rx *= RADAR_RANGE / dist;
+    ry *= RADAR_RANGE / dist;
+  }
+  return {
+    px: cx + (rx / RADAR_RANGE) * radius,
+    py: cy - (ry / RADAR_RANGE) * radius,
+    clamped,
+  };
+}
+
+function drawRadarHome(ctx, cx, cy, radius) {
+  if (!homeField || !player) return;
+  const s = homeStripCenter(homeField);
+  const hw = s.halfW;
+  const hl = s.halfL;
+  const sh = Math.sin(s.heading);
+  const ch = Math.cos(s.heading);
+  const corner = (side, along) => {
+    const x = s.x + side * ch + along * -sh;
+    const z = s.z + side * -sh + along * -ch;
+    return radarPoint(x, z, radius, cx, cy);
+  };
+  const pts = [corner(-hw, -hl), corner(hw, -hl), corner(hw, hl), corner(-hw, hl)];
+  const home = radarPoint(s.x, s.z, radius, cx, cy);
+  const hot = fuel <= FUEL.LOW || Boolean(victoryAt);
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.strokeStyle = hot ? '#f0c45a' : '#f0c45acc';
+  ctx.lineWidth = hot ? 2.2 : 1.6;
+  ctx.setLineDash(hot ? [4, 3] : []);
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(home.px, home.py);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(pts[0].px, pts[0].py);
+  pts.slice(1).forEach((p) => ctx.lineTo(p.px, p.py));
+  ctx.closePath();
+  ctx.fillStyle = hot ? 'rgba(240,196,90,0.42)' : 'rgba(240,196,90,0.28)';
+  ctx.fill();
+  ctx.strokeStyle = '#f8e7a8';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.save();
+  ctx.translate(home.px, home.py);
+  ctx.rotate(-flight.heading + s.heading);
+  ctx.fillStyle = '#111810';
+  ctx.fillRect(-1.1, -7, 2.2, 14);
+  ctx.restore();
+  ctx.fillStyle = '#f0c45a';
+  ctx.font = '700 11px Barlow Condensed, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('H', home.px, home.py);
+  ctx.restore();
 }
 
 function drawBriefPhoto(mission) {
@@ -2203,6 +2321,7 @@ function drawBriefingMap() {
     enemies,
     targets,
     waypoints,
+    homeField,
   });
 }
 
@@ -2350,13 +2469,15 @@ function update(dt) {
         applyFlightPose();
         const speed = flown.speed;
         airspeed = speed;
-        if (flown.groundDamage) damagePlayer(flown.groundDamage);
+        const stripNow = fuelJob ? overStrip() : null;
+        const caught = fuelJob && !flight.grounded && shouldAutoLand(stripNow, landMeter) && tryLand({ auto: true });
+        if (flown.groundDamage && !caught) damagePlayer(flown.groundDamage);
         updateCockpit(speed);
         if (fuelJob && !flight.grounded) {
           fuel = Math.max(0, fuel - FUEL.BURN_PER_S * dt);
           if (!sputtered && fuel <= FUEL.SPUTTER) {
             sputtered = true;
-            notify('ENGINE COUGHING · GO HOME');
+            notify('ENGINE COUGHING · FOLLOW THE COMPASS HOME');
           }
         }
         updateHomePrompt(dt);
@@ -2760,7 +2881,7 @@ function beginMp(snap) {
   $('fuel-stat')?.classList.add('hidden');
   ui.landBtn?.classList.add('hidden');
   ui.takeoffBtn?.classList.add('hidden');
-  ui.landPrompt?.classList.add('hidden');
+  hideHomeAids();
   for (const obj of [...enemies.map((e) => e.model), ...targets, ...waypoints.map((w) => w.mesh), ...bullets.map((b) => b.mesh), ...bombs.map((b) => b.mesh)]) {
     scene.remove(obj);
   }
@@ -2910,7 +3031,7 @@ function renderMpHud(snap) {
   }
   const living = (snap.pilots || []).filter((p) => p.alive);
   const feed = $('kill-feed');
-  if (feed) feed.innerHTML = (snap.events || []).map((e) => `<div>${e.text}</div>`).join('');
+  if (feed) feed.innerHTML = (snap.events || []).map((e) => `<div>${String(e.text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`).join('');
   const live = $('mp-living');
   if (live) {
     live.classList.toggle('hidden', snap.mode !== 'duel');

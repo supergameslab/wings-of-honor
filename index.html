@@ -5,11 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#101820" />
     <meta name="description" content="Wings of Honor — hop in a Spitfire and fly. Fly. Fight. Win." />
+    <meta name="robots" content="index, follow" />
     <meta property="og:title" content="Wings of Honor" />
     <meta property="og:description" content="Bank to turn, fire, and have fun in a WWII flying game in your browser." />
-    <meta property="og:image" content="/wings-of-honor/og.png" />
+    <meta property="og:image" content="https://supergameslab.com/wings-of-honor/og.png" />
+    <meta property="og:url" content="https://supergameslab.com/wings-of-honor" />
     <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="canonical" href="https://supergameslab.com/wings-of-honor" />
     <title>Wings of Honor</title>
+    <script type="application/ld+json">{"@context":"https://schema.org","@type":"VideoGame","name":"Wings of Honor","url":"https://supergameslab.com/wings-of-honor"}</script>
     <link rel="icon" href="/wings-of-honor/favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" sizes="32x32" href="/wings-of-honor/favicon-32x32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/wings-of-honor/favicon-16x16.png" />
@@ -48,9 +53,16 @@
           <div id="target-box"></div>
           <div id="target-label"></div>
         </div>
+        <div id="home-compass" class="hidden" aria-label="Home field compass">
+          <div class="home-compass-face">
+            <i id="home-needle"></i>
+            <b>H</b>
+          </div>
+          <span id="home-range">HOME</span>
+        </div>
         <div id="radar" aria-label="Tactical radar">
           <canvas id="radar-canvas" width="176" height="176"></canvas>
-          <span>RADAR</span>
+          <span id="radar-legend">RADAR</span>
         </div>
         <div class="hud-bottom">
           <div class="control-hint">↓ / S DIVE · B BOMB ON THE DIAMOND · SPACE FIRE · C COCKPIT</div>
@@ -79,7 +91,7 @@
       <section id="menu" class="screen">
         <div class="menu-backdrop"></div>
         <div class="menu-content">
-          <a class="lab-mark" href="https://supergameslab.com/"><img src="/wings-of-honor/assets/lab-logo.png" alt="Super Games Lab" /></a>
+          <a class="lab-mark" href="https://supergameslab.com/"><img src="/wings-of-honor/assets/sgl-logo.png" width="280" height="28" alt="Super Games Lab" /></a>
           <div class="eyebrow">A WWII FLYING GAME</div>
           <h1>WINGS OF<br><span>HONOR</span></h1>
           <p class="tagline">FLY. FIGHT. WIN.</p>
@@ -203,10 +215,10 @@
             <p><b>CLIMB / DIVE</b><br>W or ↑ pulls the nose up. S or ↓ points it down. Aim, then fire.</p>
             <p><b>TURN</b><br>A / ← and D / → tilt the wings. The plane turns the way you lean.</p>
             <p><b>FIRE</b><br>Hold SPACE or FIRE. Named aces like Hartmann take more hits and are worth extra points.</p>
-            <p><b>BOMBS &amp; MAP</b><br>On bomb missions, put the diamond on the target and press B. Red dots on the little map are planes. Gold is stuff on the ground.</p>
+            <p><b>BOMBS &amp; MAP</b><br>On bomb missions, put the diamond on the target and press B. Red dots on the little map are planes. Gold squares are ground targets. The long gold bar is your home strip.</p>
             <p><b>COCKPIT</b><br>Press C to sit inside the plane. Press it again to fly behind it.</p>
             <p><b>HANGAR</b><br>Finish campaign missions to unlock more planes.</p>
-            <p><b>HOME FIELD</b><br>On later campaign jobs, hold FIRE on the grass to taxi, then press T when the HUD says TAKE OFF. Line up with the sheds, wait for LAND, press L. Tanks and bombs fill up. Cadet, Quick Mission, and Hunt skip this.</p>
+            <p><b>HOME FIELD</b><br>On later Pilot and Ace campaign jobs you start on the grass. Hold FIRE to taxi, then press T or tap UP when the HUD says TAKE OFF. When fuel runs low, follow the compass to the gold strip on radar. Press L or tap LAND — or just settle onto the grass and the field will catch you. Cadet, Quick Mission, and Hunt skip this.</p>
           </div>
           <button id="help-close" class="primary-btn">GOT IT</button>
         </div>
@@ -217,6 +229,7 @@
           <h2>No password.</h2>
           <p class="brief-copy">Type an email. We'll send a magic link. Friends can invite you the same way, even before you pick a name.</p>
           <input id="auth-email" class="field" type="email" placeholder="you@example.com" autocomplete="email" />
+          <div id="auth-turnstile"></div>
           <p id="auth-status" class="brief-meta"></p>
           <button id="auth-send" class="primary-btn">SEND LINK</button>
           <button id="auth-close" class="secondary-btn">BACK</button>
@@ -354,6 +367,7 @@
         </div>
       </section>
     </main>
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" defer></script>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

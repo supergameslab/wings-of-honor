@@ -3,6 +3,18 @@ export { clamp, lerp, damp, euclideanModulo, saturate, smoothstep, angleDiff, an
 export { makeParams, setHeightParams, getHeightParams, heightAt, paramsForMission } from './height.js';
 export { forwardFromEuler, rightFromHeading, createCraft, integrateFlight, applyPose } from './flight.js';
 export {
+  homeStripCenter,
+  stripOffset,
+  overHomeStrip,
+  linedUp,
+  homeNav,
+  canCommitLand,
+  shouldAutoLand,
+  landRejectReason,
+  stepLandMeter,
+  landingCue,
+} from './home.js';
+export {
   dist3,
   dist2,
   bulletHits,

@@ -159,7 +159,17 @@ html.portal,body.portal{overflow:auto;height:auto;min-height:100%;touch-action:a
 .lab-board em{font-style:normal;font-family:'Barlow Condensed',sans-serif;color:var(--gold);font-size:20px}
 .lab-foot{margin-top:48px;color:#9aa6a2;font-size:11px;letter-spacing:.08em}
 .lab-foot a{color:var(--gold)}
-#land-prompt{position:absolute;left:50%;bottom:22%;transform:translateX(-50%);font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:clamp(22px,4.2vw,38px);letter-spacing:.16em;color:#f0c45a;text-shadow:0 3px 14px #000;pointer-events:none;z-index:4;white-space:nowrap}
+#land-prompt{position:absolute;left:50%;bottom:22%;transform:translateX(-50%);font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:clamp(22px,4.2vw,38px);letter-spacing:.16em;color:#f0c45a;text-shadow:0 3px 14px #000;pointer-events:none;z-index:4;white-space:normal;text-align:center;max-width:min(92vw,560px)}
+#land-prompt strong{display:block}
+#land-prompt small{display:block;margin-top:4px;font-size:.42em;letter-spacing:.12em;color:#e9e2d1;font-weight:700}
+#home-compass{position:absolute;top:max(64px,calc(env(safe-area-inset-top) + 52px));left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:4px;z-index:4;pointer-events:none}
+.home-compass-face{position:relative;width:54px;height:54px;border-radius:50%;border:2px solid #f0c45a;background:rgba(10,18,22,.72);box-shadow:0 6px 18px #0008,inset 0 0 12px #0006}
+.home-compass-face b{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'Barlow Condensed',sans-serif;font-size:13px;letter-spacing:.08em;color:#f0c45a}
+#home-needle{position:absolute;left:50%;top:50%;width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:22px solid #f0c45a;margin:-20px 0 0 -6px;transform-origin:50% 20px;filter:drop-shadow(0 1px 2px #000)}
+#home-range{font-family:'Barlow Condensed',sans-serif;font-size:11px;letter-spacing:.14em;color:#f0c45a;text-shadow:0 1px 6px #000}
+#home-compass.low .home-compass-face{border-color:#b94738;box-shadow:0 0 16px #b9473888,inset 0 0 12px #0006}
+#home-compass.low #home-needle{border-bottom-color:#ffb3a6}
+#home-compass.low #home-range{color:#ffb3a6}
 .round-button.land,.round-button.takeoff{width:48px;height:48px;color:#ffe2a6;font-size:9px}
 .round-button.ready{border-color:#f0c45a;box-shadow:0 0 16px #f0c45a88;background:#8e6c38c9;color:#11191b}
 html,body,#game-shell,#hud,canvas,button,.stick-zone,.stick-base,.round-button{
@@ -178,7 +188,7 @@ input,textarea,.field{
   -webkit-tap-highlight-color:rgba(214,179,110,.25);
 }
 #hud{position:absolute;inset:0;pointer-events:none;z-index:3}
-.hud-top,.hud-bottom,#radar,#reticle,#bombsight,#target-mark,#toast,#land-prompt,#kill-feed,#mp-living,#tracer-hud{pointer-events:none}
+.hud-top,.hud-bottom,#radar,#reticle,#bombsight,#target-mark,#toast,#land-prompt,#home-compass,#kill-feed,#mp-living,#tracer-hud{pointer-events:none}
 .hud-top button,.stats-card button{pointer-events:auto}
 .stick-base.floating{position:absolute;top:auto;right:auto;bottom:auto;margin:0;transform:translate(-50%,-50%);z-index:2}
 @media (pointer:coarse),(max-width:760px){
@@ -234,6 +244,9 @@ input,textarea,.field{
     width:80px;
   }
   #radar canvas{width:80px;height:80px}
+  #home-compass{top:max(56px,calc(env(safe-area-inset-top) + 46px))}
+  .home-compass-face{width:44px;height:44px}
+  #home-needle{border-bottom-width:18px;margin:-16px 0 0 -5px;transform-origin:50% 16px;border-left-width:5px;border-right-width:5px}
 }
 @media (orientation:landscape) and (pointer:coarse){
   .stick-zone{width:min(34vw,220px);height:min(52vh,170px);height:min(52dvh,170px)}
@@ -247,5 +260,5 @@ input,textarea,.field{
   }
   #radar canvas{width:72px;height:72px}
 }
-.lab-mark{display:inline-block;margin:0 0 16px;line-height:0}
-.lab-mark img{height:28px;width:auto;display:block}
+.lab-mark{display:inline-block;margin:0 0 16px;line-height:0;max-width:100%}
+.lab-mark img{height:auto;max-height:28px;width:auto;max-width:min(280px,100%);display:block}

@@ -3,16 +3,17 @@ import { apiPath } from './paths.js';
 const TOKEN_KEY = 'wings-honor-session';
 const USER_KEY = 'wings-honor-user';
 
-let sessionToken = localStorage.getItem(TOKEN_KEY) || '';
+export function isNative() {
+  return Boolean(window.Capacitor?.isNativePlatform?.());
+}
+
+let sessionToken = isNative() ? localStorage.getItem(TOKEN_KEY) || '' : '';
+if (!isNative()) localStorage.removeItem(TOKEN_KEY);
 let current = null;
 try {
   current = JSON.parse(localStorage.getItem(USER_KEY) || 'null');
 } catch {
   current = null;
-}
-
-export function isNative() {
-  return Boolean(window.Capacitor?.isNativePlatform?.());
 }
 
 export function getSession() {
@@ -39,9 +40,12 @@ export async function api(path, options = {}) {
 
 function persist(user, token) {
   current = user;
-  if (token) {
+  if (isNative() && token) {
     sessionToken = token;
     localStorage.setItem(TOKEN_KEY, token);
+  } else if (!isNative()) {
+    sessionToken = '';
+    localStorage.removeItem(TOKEN_KEY);
   }
   if (user) localStorage.setItem(USER_KEY, JSON.stringify(user));
   else localStorage.removeItem(USER_KEY);
@@ -57,14 +61,15 @@ export async function refreshMe() {
   return null;
 }
 
-export async function requestMagic(email) {
-  return api('/api/auth/magic', { method: 'POST', body: JSON.stringify({ email }) });
+export async function requestMagic(email, turnstile = '') {
+  return api('/api/auth/magic', { method: 'POST', body: JSON.stringify({ email, turnstile }) });
 }
 
 export async function consumeToken(token) {
   const aid = localStorage.getItem('wings-honor-aid') || '';
-  const data = await api('/api/auth/consume', { method: 'POST', body: JSON.stringify({ token, aid }) });
-  if (data?.token) persist(data.user, data.token);
+  const data = await api('/api/auth/consume', { method: 'POST', body: JSON.stringify({ token, aid, native: isNative() }) });
+  if (data?.user) persist(data.user, data.token || '');
+  else if (data?.ok) await refreshMe();
   return data;
 }
 
@@ -97,7 +102,7 @@ export async function bootAuth() {
     if (consumed?.invite) sessionStorage.setItem('iron-invite', consumed.invite);
     return consumed;
   }
-  if (sessionToken) await refreshMe();
+  await refreshMe();
   try {
     const App = window.Capacitor?.Plugins?.App;
     App?.addListener?.('appUrlOpen', async (event) => {
