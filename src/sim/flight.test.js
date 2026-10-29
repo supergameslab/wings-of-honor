@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createCraft, integrateFlight, forwardFromEuler, applyPose } from './flight.js';
-import { heightAt, makeParams, riverDistance, siteBlocked } from './height.js';
+import { heightAt, makeParams, riverDistance, riverWorldPoint, siteBlocked } from './height.js';
 import { updateAi, createAiCraft } from './ai.js';
 import { bombHitsTarget, bulletHits, segmentHitsSphere, creditKill, spawnBomb, predictBombImpact, predictLanding, stepBomb } from './combat.js';
 import { layoutFor, missionById, DIFFICULTY, huntFighterCount, bombingMission, MISSIONS, targetCount, fighterCount, winFor, makeQuickSortie, isCampaignMission, makePrologue, mergeProgress, starRating, usesFuel } from '../campaign.js';
@@ -65,8 +65,29 @@ describe('height', () => {
     }
     const bed = heightAt(bedX, bedZ, 'fields', p);
     const bank = heightAt(bedX + 240, bedZ + 240, 'fields', p);
-    expect(bed).toBeLessThan(bank - 12);
+    expect(bed).toBeLessThan(bank - 4);
     expect(siteBlocked(bedX, bedZ, 'fields', p)).toBe(true);
+  });
+
+  it('runs downhill along the river bed', () => {
+    const p = makeParams(4);
+    let prev = Infinity;
+    let samples = 0;
+    for (let rx = -900; rx <= 900; rx += 50) {
+      const pt = riverWorldPoint(rx, p);
+      const h = heightAt(pt.x, pt.z, 'fields', p);
+      expect(h).toBeLessThanOrEqual(prev + 0.05);
+      prev = h;
+      samples += 1;
+    }
+    expect(samples).toBeGreaterThan(10);
+    prev = Infinity;
+    for (let rx = -600; rx <= 600; rx += 50) {
+      const pt = riverWorldPoint(rx, p);
+      const h = heightAt(pt.x, pt.z, 'hills', p);
+      expect(h).toBeLessThanOrEqual(prev + 0.05);
+      prev = h;
+    }
   });
 
   it('keeps the river valley going far from the origin', () => {
@@ -96,7 +117,7 @@ describe('height', () => {
       if (best < 24) {
         const bed = heightAt(bedX, bedZ, 'fields', p);
         const bank = heightAt(bedX + 260, bedZ + 260, 'fields', p);
-        expect(bed).toBeLessThan(bank - 12);
+        expect(bed).toBeLessThan(bank - 4);
         found = true;
         break;
       }

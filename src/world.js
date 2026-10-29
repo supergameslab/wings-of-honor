@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { makeParams, heightAt as terrainHeightAt, setHeightParams, paramsForMission, riverDistance, canalDistance, roadDistance, siteBlocked } from './sim/height.js';
+import { makeParams, heightAt as terrainHeightAt, setHeightParams, paramsForMission, riverCenterZ, riverDistance, canalDistance, roadDistance, siteBlocked } from './sim/height.js';
 
 const SIZE = 2400;
 const HORIZON = 14000;
@@ -292,17 +292,8 @@ function landTexture(terrain, worldSpan = SIZE, resolution) {
         col = mix3(col, trench, 1 - smoothstep(2.2, 8.5, ditch));
         if (ditch < 5) col = mix3(col, [48, 92, 96], saturate(1 - ditch / 5) * 0.85);
         const river = riverDistance(wx, wz);
-        if (river < 36) col = mix3(col, [86, 78, 54], saturate(1 - (river - 16) / 20) * 0.62);
-        if (river < 18) col = mix3(col, [42, 102, 98], saturate(1 - river / 18) * 0.95);
-        if (river < 9) col = mix3([28, 78, 92], [64, 122, 118], grain);
         const ham = Math.hypot(((rx + 400) % 150) - 75, ((rz + 280) % 128) - 64);
         if (ham < 22 && pick2 > 0.28 && road > 16 && river > 28) col = mix3(col, roofTerra, (1 - ham / 22) * 0.82);
-      }
-      if (terrain === 'hills' || terrain === 'savanna' || terrain === 'jungle' || terrain === 'coast' || terrain === 'town') {
-        const river = riverDistance(wx, wz);
-        if (river < 36) col = mix3(col, [86, 78, 54], saturate(1 - (river - 16) / 20) * 0.6);
-        if (river < 18) col = mix3(col, [42, 102, 98], saturate(1 - river / 18) * 0.95);
-        if (river < 9) col = mix3([28, 78, 92], [64, 122, 118], grain);
       }
       col = mix3(col, [col[0] * 0.78, col[1] * 0.82, col[2] * 0.72], noise2(px * 0.7, py * 0.66) * 0.12 + speck * 0.07);
       const i = (py * W + px) * 4;
@@ -425,6 +416,46 @@ function paintAerialParcels(ctx, W, terrain, worldSpan = SIZE) {
   ctx.globalAlpha = 1;
 }
 
+function strokePolyline(ctx, pts) {
+  if (pts.length < 2) return;
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  ctx.stroke();
+}
+
+function riverStrokePoints(W, worldSpan) {
+  const span = worldSpan * 0.5;
+  const pts = [];
+  for (let rx = -span; rx <= span; rx += 14) {
+    const wpos = fromRotated(rx, riverCenterZ(rx));
+    pts.push([(wpos.x / worldSpan + 0.5) * W, (wpos.z / worldSpan + 0.5) * W]);
+  }
+  return pts;
+}
+
+function stampRiverPath(ctx, W, worldSpan) {
+  const pts = riverStrokePoints(W, worldSpan);
+  const m = (metres, minPx) => Math.max(minPx, metresPx(metres, W, worldSpan));
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = '#4e6434';
+  ctx.lineWidth = m(42, 2);
+  strokePolyline(ctx, pts);
+  ctx.strokeStyle = '#8a7348';
+  ctx.lineWidth = m(24, 2.2);
+  strokePolyline(ctx, pts);
+  ctx.strokeStyle = '#1c6284';
+  ctx.lineWidth = m(15, 2.8);
+  strokePolyline(ctx, pts);
+  ctx.strokeStyle = '#164e68';
+  ctx.lineWidth = m(7, 1.5);
+  strokePolyline(ctx, pts);
+  ctx.restore();
+}
+
 function stampWaterways(ctx, W, terrain, worldSpan = SIZE) {
   if (terrain === 'sea' || terrain === 'island' || terrain === 'desert' || terrain === 'mountains' || terrain === 'lake') return;
   const img = ctx.getImageData(0, 0, W, W);
@@ -432,14 +463,13 @@ function stampWaterways(ctx, W, terrain, worldSpan = SIZE) {
   const hasCanal = terrain === 'fields' || terrain === 'hills' || terrain === 'town' || terrain === 'coast' || terrain === 'savanna';
   const dirt = [138, 104, 62];
   const trench = [78, 68, 52];
-  for (let py = 0; py < W; py++) {
-    for (let px = 0; px < W; px++) {
-      const wx = (px / W - 0.5) * worldSpan;
-      const wz = (py / W - 0.5) * worldSpan;
-      const i = (py * W + px) * 4;
-      let col = [d[i], d[i + 1], d[i + 2]];
-      const grain = fbm(wx * 0.045, wz * 0.045);
-      if (terrain !== 'city') {
+  if (terrain !== 'city') {
+    for (let py = 0; py < W; py++) {
+      for (let px = 0; px < W; px++) {
+        const wx = (px / W - 0.5) * worldSpan;
+        const wz = (py / W - 0.5) * worldSpan;
+        const i = (py * W + px) * 4;
+        let col = [d[i], d[i + 1], d[i + 2]];
         const road = roadDistance(wx, wz);
         col = mix3(col, dirt, (1 - smoothstep(2.4, 10, road)) * 0.94);
         if (hasCanal) {
@@ -447,20 +477,14 @@ function stampWaterways(ctx, W, terrain, worldSpan = SIZE) {
           col = mix3(col, trench, 1 - smoothstep(2.4, 11, ditch));
           if (ditch < 6) col = mix3(col, [48, 92, 96], saturate(1 - ditch / 6) * 0.88);
         }
+        d[i] = col[0];
+        d[i + 1] = col[1];
+        d[i + 2] = col[2];
       }
-      const river =
-        terrain === 'city'
-          ? Math.abs(wz - params.cityZ * 0.15 - params.riverOff * 0.35 - Math.sin((wx - params.cityX) * params.riverFreq + params.phase) * params.riverAmp)
-          : riverDistance(wx, wz);
-      if (river < 36) col = mix3(col, [86, 78, 54], saturate(1 - (river - 16) / 20) * 0.62);
-      if (river < 18) col = mix3(col, [42, 102, 98], saturate(1 - river / 18) * 0.95);
-      if (river < 9) col = mix3([28, 78, 92], [64, 122, 118], grain);
-      d[i] = col[0];
-      d[i + 1] = col[1];
-      d[i + 2] = col[2];
     }
   }
   ctx.putImageData(img, 0, 0);
+  stampRiverPath(ctx, W, worldSpan);
 }
 
 function bumpTexture(kind = 'fields') {
@@ -1543,10 +1567,10 @@ export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
         r = 0.55;
         g = 0.78;
         b = 0.82;
-      } else if ((kind === 'fields' || kind === 'town' || kind === 'hills' || kind === 'savanna') && y < -46.2) {
-        r = 0.52;
-        g = 0.76;
-        b = 0.8;
+      } else if ((kind === 'fields' || kind === 'town' || kind === 'hills' || kind === 'savanna' || kind === 'jungle' || kind === 'city' || kind === 'coast') && riverDistance(x, z) < 16) {
+        r = 0.42;
+        g = 0.74;
+        b = 0.9;
       } else if (kind === 'sea' && y > -40) {
         r = 0.78;
         g = 0.82;
@@ -1635,7 +1659,7 @@ export function createWorld(scene, { sun, hemi, renderer, fill, rim }) {
     horizonDetail.detailRepeat.value = terrainDetail.detailRepeat.value * (HORIZON / SIZE);
     horizonDetail.detailAmt.value = terrainDetail.detailAmt.value;
     horizonMat.map?.dispose();
-    const hRes = kind === 'fields' || kind === 'hills' || kind === 'coast' ? 1536 : 1024;
+    const hRes = kind === 'fields' || kind === 'hills' || kind === 'coast' ? 2048 : 1024;
     const hmap = landTexture(kind, HORIZON, hRes);
     hmap.wrapS = hmap.wrapT = THREE.ClampToEdgeWrapping;
     hmap.repeat.set(1, 1);

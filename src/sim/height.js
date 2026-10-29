@@ -1,4 +1,4 @@
-import { saturate, smoothstep } from './math.js';
+import { saturate, smoothstep, lerp } from './math.js';
 
 function n(x, z, a, b, s) {
   return Math.sin(x * a + z * b) * s;
@@ -73,9 +73,27 @@ export function riverCenterZ(rx, p = params) {
   );
 }
 
+export function riverWorldPoint(rx, p = params) {
+  const rz = riverCenterZ(rx, p);
+  return {
+    x: rx * p.cos + rz * p.sin,
+    z: -rx * p.sin + rz * p.cos,
+  };
+}
+
 export function riverDistance(x, z, p = params) {
   const w = worldXZ(x, z, p);
   return Math.abs(w.z - riverCenterZ(w.x, p));
+}
+
+export function riverGrade(rx, p = params, terrain = 'fields') {
+  const t = saturate((rx + 7200) / 14400);
+  if (terrain === 'hills') return -27 - t * 19;
+  if (terrain === 'jungle') return -31 - t * 15;
+  if (terrain === 'savanna') return -36 - t * 10;
+  if (terrain === 'coast') return -40 - t * 6;
+  if (terrain === 'city') return -43 - t * 4;
+  return -43.15 - t * 3.1;
 }
 
 export function canalDistance(x, z, p = params) {
@@ -93,26 +111,37 @@ export function roadDistance(x, z, p = params) {
 export function siteBlocked(x, z, terrain = 'fields', p = params) {
   if (terrain === 'sea' || terrain === 'island' || terrain === 'desert' || terrain === 'mountains' || terrain === 'lake') return false;
   if (roadDistance(x, z, p) < 16) return true;
-  if (riverDistance(x, z, p) < 52) return true;
+  if (riverDistance(x, z, p) < 28) return true;
   if (terrain === 'fields' || terrain === 'hills' || terrain === 'town' || terrain === 'coast' || terrain === 'savanna') {
     if (canalDistance(x, z, p) < 18) return true;
   }
   return false;
 }
 
-function waterCut(x, z, terrain, p) {
-  if (terrain === 'sea' || terrain === 'island' || terrain === 'desert' || terrain === 'mountains' || terrain === 'lake' || terrain === 'city') return 0;
-  const rd = riverDistance(x, z, p);
-  const bed = 1 - smoothstep(8, 28, rd);
-  const bank = 1 - smoothstep(28, 170, rd);
-  let cut = (terrain === 'jungle' ? 24 : 22) * bank * bank + 8 * bed;
+function hasRiver(terrain, p) {
+  if (terrain === 'sea' || terrain === 'island' || terrain === 'desert' || terrain === 'mountains' || terrain === 'lake') return false;
+  if (terrain === 'city') return Boolean(p.hasRiver);
+  return true;
+}
+
+function carveRiver(land, x, z, terrain, p) {
+  if (!hasRiver(terrain, p)) return land;
+  const w = worldXZ(x, z, p);
+  const rd = Math.abs(w.z - riverCenterZ(w.x, p));
+  const grade = riverGrade(w.x, p, terrain);
+  const valleyW = terrain === 'hills' ? 240 : terrain === 'jungle' ? 190 : 150;
+  const inValley = 1 - smoothstep(22, valleyW, rd);
+  const inChannel = 1 - smoothstep(6, 15, rd);
+  const flood = grade + 2.2;
+  let h = lerp(land, Math.min(land, flood), inValley * inValley);
+  const bed = grade - (terrain === 'hills' ? 7 : 5.4);
+  h = lerp(h, bed, inChannel * inChannel);
   if (terrain === 'fields' || terrain === 'hills' || terrain === 'town' || terrain === 'coast' || terrain === 'savanna') {
     const cd = canalDistance(x, z, p);
-    const canalBed = 1 - smoothstep(3, 11, cd);
-    const canalBank = 1 - smoothstep(11, 54, cd);
-    cut = Math.max(cut, 10 * canalBank * canalBank + 3.5 * canalBed);
+    const canal = 1 - smoothstep(3, 10, cd);
+    h = lerp(h, Math.min(h, land - 3.5), canal * canal);
   }
-  return cut;
+  return h;
 }
 
 export function heightAt(x, z, terrain = 'fields', p = params) {
@@ -128,17 +157,15 @@ export function heightAt(x, z, terrain = 'fields', p = params) {
   }
   if (terrain === 'fields' || terrain === 'town') {
     const land = -42 + n(xr, zr, p.fx, p.fz, 2.4 * p.amp) + n(xr, zr, p.fx * 2.4, p.fz * 2.6, 0.9);
-    return Math.max(land, -44.2) - waterCut(x, z, terrain, p);
+    return carveRiver(Math.max(land, -44.2), x, z, terrain, p);
   }
   if (terrain === 'city') {
     const land = -42 + n(xr, zr, p.fx, p.fz, 1.6) + n(xr, zr, 0.02, 0.018, 0.5);
-    if (!p.hasRiver) return land;
-    const river = Math.abs(z - p.cityZ * 0.15 - p.riverOff * 0.35 - Math.sin((x - p.cityX) * p.riverFreq + p.phase) * p.riverAmp);
-    const wet = 1 - smoothstep(10, 42, river);
-    return land * (1 - wet) + -49.4 * wet;
+    return carveRiver(land, x, z, terrain, p);
   }
   if (terrain === 'hills') {
-    return -34 + n(xr, zr, p.fx * 1.4, p.fz, 16 * p.amp) + n(xr, zr, p.fx * 2.6, p.fz * 2.2, 9) + n(xr, zr, p.fx * 0.7, p.fz * 1.8, 7) - waterCut(x, z, terrain, p);
+    const land = -34 + n(xr, zr, p.fx * 1.4, p.fz, 16 * p.amp) + n(xr, zr, p.fx * 2.6, p.fz * 2.2, 9) + n(xr, zr, p.fx * 0.7, p.fz * 1.8, 7);
+    return carveRiver(land, x, z, terrain, p);
   }
   if (terrain === 'mountains') {
     const ridge = Math.abs(Math.sin(xr * (0.0055 + (p.seed % 4) * 0.0006) + zr * 0.0032 + p.phase));
@@ -147,7 +174,7 @@ export function heightAt(x, z, terrain = 'fields', p = params) {
   if (terrain === 'coast') {
     const water = smoothstep(-40 + p.coastOff, 150 + p.coastOff, xr);
     const land = -36 + n(xr, zr, p.fx * 1.5, p.fz, 11) + n(xr, zr, p.fx * 3, p.fz * 2.4, 4);
-    return land * (1 - water) + -46 * water - waterCut(x, z, terrain, p) * (1 - water);
+    return carveRiver(land, x, z, terrain, p) * (1 - water) + -46 * water;
   }
   if (terrain === 'desert') {
     const dunes = Math.abs(Math.sin(xr * (0.007 + (p.seed % 5) * 0.0008) + zr * 0.003 + p.phase)) * 11 + n(xr, zr, 0.014, 0.02, 5);
@@ -163,11 +190,11 @@ export function heightAt(x, z, terrain = 'fields', p = params) {
     p.kopjes.slice(0, 2).forEach((k) => {
       rock += kopje(x, z, k.x, k.z, k.r * 0.9, k.h * 0.7);
     });
-    return -39 + rise + rock - waterCut(x, z, terrain, p);
+    return carveRiver(-39 + rise + rock, x, z, terrain, p);
   }
   if (terrain === 'jungle') {
     const land = -35 + n(xr, zr, p.fx * 1.6, p.fz, 8) + n(xr, zr, 0.03, 0.022, 3);
-    return land - waterCut(x, z, terrain, p);
+    return carveRiver(land, x, z, terrain, p);
   }
   if (terrain === 'lake') {
     const water = smoothstep(-30 + p.coastOff, 190 + p.coastOff, zr);

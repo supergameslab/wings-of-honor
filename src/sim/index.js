@@ -1,6 +1,6 @@
 export { PROTOCOL, FLIGHT, COMBAT, NET, FUEL, windFor, missionSeed } from './constants.js';
 export { clamp, lerp, damp, euclideanModulo, saturate, smoothstep, angleDiff, analogStick } from './math.js';
-export { makeParams, setHeightParams, getHeightParams, heightAt, paramsForMission, riverCenterZ, riverDistance, canalDistance, roadDistance, siteBlocked } from './height.js';
+export { makeParams, setHeightParams, getHeightParams, heightAt, paramsForMission, riverCenterZ, riverWorldPoint, riverGrade, riverDistance, canalDistance, roadDistance, siteBlocked } from './height.js';
 export { forwardFromEuler, rightFromHeading, createCraft, integrateFlight, applyPose } from './flight.js';
 export {
   homeStripCenter,
