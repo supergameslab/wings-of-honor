@@ -1,0 +1,8 @@
+---
+description: Never put Cursor or model trailers on git commits
+alwaysApply: true
+---
+
+# No AI / Cursor git trailers
+
+Never add `Co-authored-by: Cursor <cursoragent@cursor.com>` or any Cursor/model co-author, Made-with, or Generated-by line to commits, PRs, or git notes. Messages describe the work only.
