@@ -23,7 +23,7 @@ export function createAiCraft(spawn, spec) {
     turn: 0.86 * tuned.enemySpeed * (ace ? 1.34 : 1),
     hitRadius: spawn.hitRadius ?? (ace ? (tuned.hitRadius || 3.2) : COMBAT.HIT_RADIUS_AI),
     alive: true,
-    state: 'convert',
+    state: 'attack',
     breakTimer: 0,
     breakSign: 1,
     breakPitch: 0.4,
@@ -84,9 +84,9 @@ export function updateAi(e, player, dt, sampleHeight, rng = Math.random) {
   if (e.wasHit) {
     e.wasHit = false;
     e.state = 'break';
-    e.breakTimer = (ace ? 3.1 : 1.7) + rng() * 0.9;
+    e.breakTimer = (ace ? 0.95 : 0.62) + rng() * 0.22;
     e.breakSign = Math.sign(rng() - 0.5) || 1;
-    e.breakPitch = rng() > 0.38 ? -0.62 : 0.42;
+    e.breakPitch = rng() > 0.38 ? -0.62 : 0.48;
     e.turnCommit = e.breakSign;
   }
   const fwd = forwardFromEuler(e.heading, e.pitch);
@@ -97,42 +97,37 @@ export function updateAi(e, player, dt, sampleHeight, rng = Math.random) {
   toPlayer.z /= dist;
   const facingPlayer = fwd.x * toPlayer.x + fwd.y * toPlayer.y + fwd.z * toPlayer.z;
   const pFwd = forwardFromEuler(player.heading, player.pitch);
-  const aimX = e.x - player.x;
-  const aimY = e.y - player.y;
-  const aimZ = e.z - player.z;
-  const aimLen = Math.max(0.001, Math.hypot(aimX, aimY, aimZ));
-  const enemyFromPlayer = (pFwd.x * aimX + pFwd.y * aimY + pFwd.z * aimZ) / aimLen;
-  const onPlayersSix = enemyFromPlayer < -0.22 && dist < 95;
-  const playerOnTail = facingPlayer < (ace ? 0.08 : -0.18) && dist < (ace ? 98 : 72);
+  const playerOnTail = facingPlayer < -0.42 && dist < 44;
 
   if (playerOnTail && e.breakTimer <= 0) {
     e.state = 'break';
-    e.breakTimer = (ace ? 2.8 : 2.2) + rng() * 1.1;
+    e.breakTimer = (ace ? 0.82 : 0.55) + rng() * 0.18;
     e.breakSign = Math.sign(rng() - 0.5) || 1;
-    e.breakPitch = rng() > 0.32 ? (ace ? -0.58 : -0.35) : 0.18;
+    e.breakPitch = rng() > 0.32 ? (ace ? -0.58 : -0.38) : 0.28;
     e.turnCommit = e.breakSign;
   }
 
   let aim = { x: player.x, y: player.y, z: player.z };
   const eright = rightFromHeading(e.heading);
   const pright = rightFromHeading(player.heading);
-  if (e.state === 'break' && e.breakTimer > 0.25) {
+  const weaveY = Math.sin(e.phase * 1.15) * 5.5;
+  if (e.state === 'break' && e.breakTimer > 0.1) {
     aim = {
-      x: e.x + fwd.x * 40 + eright.x * e.breakSign * 90,
-      y: player.y + e.breakPitch * 14,
-      z: e.z + fwd.z * 40 + eright.z * e.breakSign * 90,
+      x: player.x + eright.x * e.breakSign * 34,
+      y: player.y + e.breakPitch * 16,
+      z: player.z + eright.z * e.breakSign * 34,
     };
-  } else if (onPlayersSix || (facingPlayer > 0.62 && dist < 78)) {
+  } else if (facingPlayer > 0.2 || dist > 70) {
     e.state = 'attack';
-    const lead = Math.min(28, dist * 0.22);
-    aim = { x: player.x + pFwd.x * lead, y: player.y + pFwd.y * lead, z: player.z + pFwd.z * lead };
+    const lead = facingPlayer > 0.38 ? Math.min(ace ? 24 : 16, dist * 0.14) : 0;
+    aim = { x: player.x + pFwd.x * lead, y: player.y + 2 + weaveY, z: player.z + pFwd.z * lead };
   } else {
     e.state = 'convert';
-    const sway = Math.sin(e.phase * 0.45 + e.turn) * (ace ? 38 : 22);
+    const sway = Math.sin(e.phase * 0.9 + e.turn) * (ace ? 20 : 12);
     aim = {
-      x: player.x + pFwd.x * -36 + pright.x * sway,
-      y: player.y - 2 + Math.sin(e.phase * 0.55) * 3,
-      z: player.z + pFwd.z * -36 + pright.z * sway,
+      x: player.x + pFwd.x * -16 + pright.x * sway,
+      y: player.y + weaveY,
+      z: player.z + pFwd.z * -16 + pright.z * sway,
     };
   }
 
@@ -142,9 +137,11 @@ export function updateAi(e, player, dt, sampleHeight, rng = Math.random) {
   const toP = { x: player.x - e.x, y: player.y - e.y, z: player.z - e.z };
   const pDist = Math.max(0.001, Math.hypot(toP.x, toP.y, toP.z));
   const cone = (fly.x * toP.x + fly.y * toP.y + fly.z * toP.z) / pDist;
-  if (e.fireTimer <= 0 && pDist < COMBAT.FIRE_RANGE && cone > COMBAT.FIRE_CONE) {
+  const aiRange = Math.max(COMBAT.FIRE_RANGE, 120);
+  const aiCone = Math.min(COMBAT.FIRE_CONE, 0.76);
+  if (e.fireTimer <= 0 && pDist < aiRange && cone > aiCone) {
     fire = true;
-    e.fireTimer = (e.fireInterval || 2.1) + rng() * 0.7;
+    e.fireTimer = (e.fireInterval || 2.1) * 0.72 + rng() * 0.35;
   }
   return { fire, forward: fly, dist: pDist, ram: pDist < 5 };
 }

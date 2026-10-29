@@ -314,7 +314,8 @@ describe('combat and ai', () => {
     e.wasHit = true;
     updateAi(e, { x: 0, y: 40, z: 80, heading: 0, pitch: 0 }, 0.05, () => -42);
     expect(e.state).toBe('break');
-    expect(e.breakTimer).toBeGreaterThan(2);
+    expect(e.breakTimer).toBeGreaterThan(0.5);
+    expect(e.breakTimer).toBeLessThan(1.4);
   });
 
   it('rolls a random quick sortie that does not count as campaign', () => {
@@ -487,6 +488,15 @@ describe('combat and ai', () => {
     const player = { x: 0, y: 40, z: -55, heading: 0, pitch: 0, roll: 0 };
     const r = updateAi(e, player, 0.05, flatHeight, () => 0.1);
     expect(r.fire).toBe(true);
+    expect(e.state).toBe('attack');
+  });
+
+  it('closes to fight instead of running out', () => {
+    const e = createAiCraft({ x: 0, y: 40, z: 0, heading: 0, fireTimer: 9 }, DIFFICULTY.normal);
+    const player = { x: 0, y: 40, z: -180, heading: 0, pitch: 0, roll: 0 };
+    const start = Math.hypot(e.x - player.x, e.z - player.z);
+    for (let i = 0; i < 40; i++) updateAi(e, player, 0.05, flatHeight, () => 0.1);
+    expect(Math.hypot(e.x - player.x, e.z - player.z)).toBeLessThan(start - 20);
     expect(e.state).toBe('attack');
   });
 
